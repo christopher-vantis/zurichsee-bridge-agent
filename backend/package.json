@@ -1,0 +1,20 @@
+{
+  "name": "zurichsee-bridge-agent-backend",
+  "version": "1.0.0",
+  "description": "RAG-based AI stakeholder agent for Zürichsee bridge planning meetings",
+  "type": "module",
+  "scripts": {
+    "preprocess": "node scripts/preprocess.js",
+    "diagnose": "node scripts/diagnose.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "natural": "6.12.0",
+    "pdf-parse": "^1.1.1"
+  }
+}
