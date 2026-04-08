@@ -1,18 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
-// ── API helper ──────────────────────────────────────────────────────────
 const API_BASE = "/api";
 
 async function fetchPersonas() {
   const res = await fetch(`${API_BASE}/personas`);
   return res.json();
 }
-
 async function fetchStats() {
   const res = await fetch(`${API_BASE}/stats`);
   return res.json();
 }
-
 async function sendChat(query, personaId, history) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
@@ -26,104 +23,51 @@ async function sendChat(query, personaId, history) {
   return res.json();
 }
 
-// ── Preset questions for demo ───────────────────────────────────────────
-const PRESETS = [
-  {
-    label: "Position on bridge",
-    text: "What is your position on the proposed bridge over Lake Zürich?",
-  },
-  {
-    label: "Budget cuts",
-    text: "The mayor proposes cutting the environmental mitigation budget by 40%. How do you respond?",
-  },
-  {
-    label: "Economic benefits",
-    text: "The bridge would reduce commute times by 35 minutes and create 2,000 jobs. Doesn't that outweigh environmental concerns?",
-  },
-  {
-    label: "Compromise offer",
-    text: "We are willing to plant 500 trees and create a small nature reserve as compensation. Would that address your concerns?",
-  },
-  {
-    label: "Legal challenge",
-    text: "If the project proceeds without addressing your demands, what will you do?",
-  },
-  {
-    label: "Alternatives",
-    text: "What alternatives to the bridge would you propose to improve cross-lake connectivity?",
-  },
+const CONSULT_PRESETS = [
+  { label: "Position on bridge", text: "What is your position on the proposed bridge over Lake Zürich?" },
+  { label: "Budget cuts", text: "The mayor proposes cutting the environmental mitigation budget by 40%. How do you respond?" },
+  { label: "Economic benefits", text: "The bridge would reduce commute times by 35 minutes and create 2,000 jobs. Doesn't that outweigh environmental concerns?" },
+  { label: "Compromise offer", text: "We are willing to plant 500 trees and create a small nature reserve as compensation. Would that address your concerns?" },
+  { label: "Legal challenge", text: "If the project proceeds without addressing your demands, what will you do?" },
+  { label: "Alternatives", text: "What alternatives to the bridge would you propose to improve cross-lake connectivity?" },
 ];
 
-// ── RAG Pipeline Step Indicator ─────────────────────────────────────────
+const DEBATE_PRESETS = [
+  { label: "Opening statement", text: "I'd like to present my position on this project." },
+  { label: "Push back", text: "I strongly disagree with what was just said, and here's why." },
+  { label: "Propose a deal", text: "Let me suggest a compromise that could address multiple concerns here." },
+  { label: "Legal point", text: "I need to raise a legal consideration that hasn't been adequately addressed." },
+  { label: "Question costs", text: "Let's talk honestly about the financial reality of this project." },
+  { label: "Closing argument", text: "To summarize my position on this matter:" },
+];
+
 function RagStepIndicator({ step, label, sublabel, active, color, delay = 0 }) {
   const [visible, setVisible] = useState(delay === 0);
-
   useEffect(() => {
     if (delay > 0 && active) {
-      const timer = setTimeout(() => setVisible(true), delay);
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => setVisible(true), delay);
+      return () => clearTimeout(t);
     }
   }, [active, delay]);
-
   if (!visible) return <div style={{ height: 44 }} />;
-
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 12px",
-        background: color + "08",
-        border: `1px solid ${color}20`,
-        borderRadius: 8,
-        animation: "ragStepIn 0.3s ease-out",
-      }}
-    >
-      <div
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: "50%",
-          background: color + "18",
-          color: color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          fontWeight: 700,
-          flexShrink: 0,
-        }}
-      >
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: color + "08", border: `1px solid ${color}20`, borderRadius: 8, animation: "ragStepIn 0.3s ease-out" }}>
+      <div style={{ width: 24, height: 24, borderRadius: "50%", background: color + "18", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
         {step}
       </div>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917" }}>
-          {label}
-        </div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917" }}>{label}</div>
         <div style={{ fontSize: 11, color: "#78716c" }}>{sublabel}</div>
       </div>
-      <div
-        style={{
-          marginLeft: "auto",
-          width: 14,
-          height: 14,
-          border: `2px solid ${color}40`,
-          borderTopColor: color,
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-          flexShrink: 0,
-        }}
-      />
+      <div style={{ marginLeft: "auto", width: 14, height: 14, border: `2px solid ${color}40`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
     </div>
   );
 }
 
-// ── Main App ────────────────────────────────────────────────────────────
 export default function App() {
-  const [phase, setPhase] = useState("intro"); // intro | meeting
+  const [phase, setPhase] = useState("intro");
+  const [mode, setMode] = useState(null); // null | "consult" | "debate"
   const [personas, setPersonas] = useState([]);
-  const [selectedPersona, setSelectedPersona] = useState(null);
   const [stats, setStats] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -132,294 +76,362 @@ export default function App() {
   const [showSources, setShowSources] = useState(false);
   const [error, setError] = useState(null);
 
+  // Consult mode
+  const [activePersona, setActivePersona] = useState(null);
+
+  // Debate mode
+  const [userPersona, setUserPersona] = useState(null);
+  const [debatePersonas, setDebatePersonas] = useState([]);
+  const [debateIndex, setDebateIndex] = useState(0);
+
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Load personas and stats on mount
   useEffect(() => {
-    fetchPersonas()
-      .then(setPersonas)
-      .catch((e) => setError("Could not connect to backend. Is it running on port 3001?"));
+    fetchPersonas().then(setPersonas).catch(() => setError("Could not connect to backend. Is it running on port 3001?"));
     fetchStats().then(setStats).catch(() => {});
   }, []);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
-    setTimeout(
-      () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }),
-      100
-    );
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }, [messages, isLoading]);
 
-  // Focus input when entering meeting
   useEffect(() => {
-    if (phase === "meeting") {
-      setTimeout(() => inputRef.current?.focus(), 300);
-    }
+    if (phase === "meeting") setTimeout(() => inputRef.current?.focus(), 300);
   }, [phase]);
 
-  const startMeeting = (persona) => {
-    setSelectedPersona(persona);
-    setMessages([
-      {
-        role: "system",
-        content: `Kantonsrätin Meier opens the session: "Welcome to today's consultation on the proposed Zürichsee bridge. We have ${persona.name} from ${persona.organization} joining us as stakeholder representative. Please proceed with your questions."`,
-      },
-    ]);
+  const reset = () => {
+    setPhase("intro");
+    setMode(null);
+    setActivePersona(null);
+    setUserPersona(null);
+    setDebatePersonas([]);
+    setDebateIndex(0);
+    setMessages([]);
+    setInput("");
+    setError(null);
+    setLastSources(null);
+    setShowSources(false);
+  };
+
+  const startConsult = (persona) => {
+    setActivePersona(persona);
+    setMessages([{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }]);
+    setPhase("meeting");
+  };
+
+  const startDebate = (myPersona) => {
+    setUserPersona(myPersona);
+    const others = personas.filter((p) => p.id !== myPersona.id);
+    setDebatePersonas(others);
+    setDebateIndex(0);
+    setMessages([{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }]);
     setPhase("meeting");
   };
 
   const switchPersona = (persona) => {
-    setSelectedPersona(persona);
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "system",
-        content: `Kantonsrätin Meier: "Thank you. We now hear from ${persona.name}, ${persona.organization}."`,
-      },
-    ]);
+    setActivePersona(persona);
+    setMessages((prev) => [...prev, { role: "system", content: `Switched to ${persona.name} · ${persona.organization}` }]);
     setLastSources(null);
   };
 
   const handleSend = useCallback(
     async (text) => {
-      if (!text.trim() || isLoading || !selectedPersona) return;
-
-      const userMsg = { role: "user", content: text.trim() };
-      setMessages((prev) => [...prev, userMsg]);
+      if (!text.trim() || isLoading) return;
+      const trimmed = text.trim();
       setInput("");
-      setIsLoading(true);
       setError(null);
       setLastSources(null);
+      setIsLoading(true);
 
-      // Build history for the API (only user/assistant messages, not system)
-      const history = messages
-        .filter((m) => m.role !== "system")
-        .concat(userMsg);
+      if (mode === "consult") {
+        const userMsg = { role: "user", content: trimmed };
+        setMessages((prev) => [...prev, userMsg]);
+        const history = messages.filter((m) => m.role !== "system").concat(userMsg);
+        try {
+          const result = await sendChat(trimmed, activePersona.id, history);
+          setMessages((prev) => [...prev, { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: activePersona }]);
+          setLastSources(result.sources);
+        } catch (err) {
+          setError(err.message);
+          setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: activePersona }]);
+        }
+      } else {
+        // Debate mode
+        const respondingPersona = debatePersonas[debateIndex % debatePersonas.length];
+        const contextualQuery = `[${userPersona.name}, ${userPersona.role} at ${userPersona.organization}:]\n\n${trimmed}`;
+        const userMsg = { role: "user", content: trimmed, isDebateUser: true };
+        setMessages((prev) => [...prev, userMsg]);
 
-      try {
-        const result = await sendChat(
-          text.trim(),
-          selectedPersona.id,
-          history
-        );
+        const history = messages
+          .filter((m) => m.role !== "system")
+          .map((m) =>
+            m.isDebateUser
+              ? { role: "user", content: `[${userPersona.name}:]\n${m.content}` }
+              : { role: "assistant", content: m.content }
+          );
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: result.response,
-            sources: result.sources,
-            meta: result.meta,
-          },
-        ]);
-        setLastSources(result.sources);
-      } catch (err) {
-        setError(err.message);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content:
-              "I apologize — a technical issue prevented my response. Please try again.",
-          },
-        ]);
-      } finally {
-        setIsLoading(false);
+        try {
+          const result = await sendChat(contextualQuery, respondingPersona.id, history);
+          setMessages((prev) => [...prev, { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: respondingPersona }]);
+          setLastSources(result.sources);
+          setDebateIndex((prev) => (prev + 1) % debatePersonas.length);
+        } catch (err) {
+          setError(err.message);
+          setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: respondingPersona }]);
+        }
       }
+
+      setIsLoading(false);
     },
-    [messages, isLoading, selectedPersona]
+    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex]
   );
 
-  const handleSubmit = (e) => {
-    e?.preventDefault?.();
-    handleSend(input);
-  };
+  const accentColor = mode === "consult" ? activePersona?.color : userPersona?.color;
+  const respondingNow = mode === "debate" ? debatePersonas[debateIndex % debatePersonas.length] : null;
 
-  // ── INTRO SCREEN ──────────────────────────────────────────────────────
+  // ── INTRO ──────────────────────────────────────────────────────────────
   if (phase === "intro") {
     return (
-      <div style={styles.introContainer}>
-        <div style={styles.introBg} />
-        <div style={styles.introContent}>
-          {/* Header */}
-          <div style={styles.introBadge}>CSCW 2026 — Interactive Prototype</div>
-          <h1 style={styles.introTitle}>Zürichsee Bridge</h1>
-          <h2 style={styles.introSubtitle}>Stakeholder Consultation Meeting</h2>
-          <p style={styles.introDesc}>
-            Key stakeholders couldn't attend today's planning session. Their AI
-            agents will represent their positions — drawing on real documents,
-            laws, and policy positions.
+      <div style={s.introContainer}>
+        <div style={s.introBg} />
+        <div style={s.introContent}>
+          <div style={s.introBadge}>CSCW 2026 — Interactive Prototype</div>
+          <h1 style={s.introTitle}>Zürichsee Bridge</h1>
+          <h2 style={s.introSubtitle}>Stakeholder Consultation Meeting</h2>
+          <p style={s.introDesc}>
+            Key stakeholders couldn't attend today's planning session. Their AI agents represent
+            their positions — drawing on real Swiss policy documents, laws, and position papers.
           </p>
 
-          {/* Error */}
-          {error && <div style={styles.errorBox}>{error}</div>}
+          {error && <div style={s.errorBox}>{error}</div>}
 
-          {/* Knowledge base stats */}
           {stats && (
-            <div style={styles.statsBox}>
-              <span style={styles.statsLabel}>Knowledge Base</span>
-              <span style={styles.statsValue}>
-                {stats.totalDocuments} documents · {stats.totalChunks} indexed
-                passages
+            <div style={s.statsBox}>
+              <span style={s.statsLabel}>Knowledge Base</span>
+              <span style={s.statsValue}>
+                {stats.totalDocuments} documents · {stats.totalChunks} indexed passages
               </span>
             </div>
           )}
 
-          {/* Persona cards */}
-          <div style={styles.personaGrid}>
-            {personas.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => startMeeting(p)}
-                style={{
-                  ...styles.personaCard,
-                  borderColor: p.color + "40",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = p.color;
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = p.color + "40";
-                  e.currentTarget.style.transform = "translateY(0)";
-                }}
-              >
-                <div style={styles.personaIcon}>{p.icon}</div>
-                <div style={{ ...styles.personaName, color: p.color }}>
-                  {p.name}
-                </div>
-                <div style={styles.personaOrg}>{p.organization}</div>
-                <div style={styles.personaRole}>{p.role}</div>
-                <div style={styles.personaDesc}>{p.shortDescription}</div>
-                <div style={{ ...styles.personaBtn, background: p.color }}>
-                  Enter as {p.name.split(" ")[0]} →
-                </div>
-              </button>
-            ))}
+          {/* Mode selection */}
+          <div style={s.modeGrid}>
+            <button
+              onClick={() => setMode(mode === "consult" ? null : "consult")}
+              style={{ ...s.modeCard, ...(mode === "consult" ? s.modeCardActive : {}) }}
+            >
+              <div style={s.modeEmoji}>🎙</div>
+              <div style={s.modeTitle}>Consult a Stakeholder</div>
+              <div style={s.modeDesc}>
+                Ask questions to any stakeholder. You are the meeting facilitator and can
+                switch between them freely.
+              </div>
+            </button>
+            <button
+              onClick={() => setMode(mode === "debate" ? null : "debate")}
+              style={{ ...s.modeCard, ...(mode === "debate" ? s.modeCardActive : {}) }}
+            >
+              <div style={s.modeEmoji}>⚔️</div>
+              <div style={s.modeTitle}>Join the Debate</div>
+              <div style={s.modeDesc}>
+                Choose your role and speak as that stakeholder. The others will respond to
+                your statements in turn.
+              </div>
+            </button>
           </div>
 
+          {/* Persona selection — appears after mode is chosen */}
+          {mode && (
+            <div style={{ animation: "fadeIn 0.2s ease-out" }}>
+              <p style={s.personaSelectLabel}>
+                {mode === "consult"
+                  ? "Select a stakeholder to begin:"
+                  : "Choose your role in the meeting:"}
+              </p>
+              <div style={s.personaGrid}>
+                {personas.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => (mode === "consult" ? startConsult(p) : startDebate(p))}
+                    style={{ ...s.personaCard, borderColor: p.color + "40" }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = p.color;
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = p.color + "40";
+                      e.currentTarget.style.transform = "translateY(0)";
+                    }}
+                  >
+                    <div style={s.personaIcon}>{p.icon}</div>
+                    <div style={{ ...s.personaName, color: p.color }}>{p.name}</div>
+                    <div style={s.personaOrg}>{p.organization}</div>
+                    <div style={s.personaRole}>{p.role}</div>
+                    <div style={s.personaDesc}>{p.shortDescription}</div>
+                    <div style={{ ...s.personaBtn, background: p.color }}>
+                      {mode === "consult"
+                        ? `Consult ${p.name.split(" ")[0]} →`
+                        : `Play as ${p.name.split(" ")[0]} →`}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // ── MEETING SCREEN ────────────────────────────────────────────────────
+  // ── MEETING ────────────────────────────────────────────────────────────
   return (
-    <div style={styles.meetingContainer}>
+    <div style={s.meetingContainer}>
       {/* Header */}
       <div
         style={{
-          ...styles.header,
-          background: `linear-gradient(135deg, ${selectedPersona.color}22, ${selectedPersona.color}11)`,
-          borderBottomColor: selectedPersona.color + "30",
+          ...s.header,
+          borderBottomColor: (accentColor || "#e7e5e4") + "40",
+          background: (accentColor || "#065f46") + "0a",
         }}
       >
-        <div style={styles.headerLeft}>
-          <div
-            style={{
-              ...styles.headerIcon,
-              background: selectedPersona.color + "25",
-            }}
-          >
-            {selectedPersona.icon}
-          </div>
-          <div>
-            <div style={styles.headerName}>
-              {selectedPersona.name} — {selectedPersona.organization}
-            </div>
-            <div style={styles.headerRole}>{selectedPersona.role}</div>
-          </div>
+        <div style={s.headerLeft}>
+          {mode === "consult" ? (
+            <>
+              <div style={{ ...s.headerIcon, background: activePersona.color + "22" }}>
+                {activePersona.icon}
+              </div>
+              <div>
+                <div style={s.headerName}>
+                  {activePersona.name} — {activePersona.organization}
+                </div>
+                <div style={s.headerRole}>{activePersona.role}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ ...s.headerIcon, background: userPersona.color + "22" }}>
+                {userPersona.icon}
+              </div>
+              <div>
+                <div style={s.headerName}>You: {userPersona.name}</div>
+                <div style={s.headerRole}>
+                  Next response: {respondingNow?.icon} {respondingNow?.name}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Persona switcher */}
-        <div style={styles.switcherRow}>
-          {personas
-            .filter((p) => p.id !== selectedPersona.id)
-            .map((p) => (
-              <button
-                key={p.id}
-                onClick={() => switchPersona(p)}
-                style={{
-                  ...styles.switchBtn,
-                  borderColor: p.color + "40",
-                  color: p.color,
-                }}
-                title={`Switch to ${p.name}`}
-              >
-                {p.icon} {p.name.split(" ")[0]}
-              </button>
-            ))}
+        <div style={s.headerRight}>
+          {mode === "consult" && (
+            <div style={s.switcherRow}>
+              {personas
+                .filter((p) => p.id !== activePersona.id)
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => switchPersona(p)}
+                    title={`Switch to ${p.name}`}
+                    style={{ ...s.switchBtn, borderColor: p.color + "40", color: p.color }}
+                  >
+                    {p.icon} {p.name.split(" ")[0]}
+                  </button>
+                ))}
+            </div>
+          )}
+          {mode === "debate" && (
+            <div style={s.switcherRow}>
+              {debatePersonas.map((p, i) => {
+                const isNext = i === debateIndex % debatePersonas.length;
+                return (
+                  <span
+                    key={p.id}
+                    title={`${p.name} — ${isNext ? "responds next" : "waiting"}`}
+                    style={{
+                      ...s.debateChip,
+                      color: p.color,
+                      border: `1px solid ${p.color}${isNext ? "90" : "30"}`,
+                      opacity: isNext ? 1 : 0.45,
+                      fontWeight: isNext ? 700 : 400,
+                    }}
+                  >
+                    {p.icon} {p.name.split(" ")[0]}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <button onClick={reset} style={s.resetBtn}>
+            ↩ Start over
+          </button>
         </div>
       </div>
 
       {/* Chat area */}
-      <div style={styles.chatArea}>
+      <div style={s.chatArea}>
         {messages.map((msg, i) => {
+          // System messages as slim dividers
           if (msg.role === "system") {
             return (
-              <div key={i} style={styles.systemMsg}>
-                <div style={styles.systemLabel}>Meeting Chair</div>
-                <div style={styles.systemText}>{msg.content}</div>
+              <div key={i} style={s.divider}>
+                <div style={s.dividerLine} />
+                <span style={s.dividerText}>{msg.content}</span>
+                <div style={s.dividerLine} />
               </div>
             );
           }
 
           const isUser = msg.role === "user";
+          const bubblePersona =
+            msg.persona || (isUser && mode === "debate" ? userPersona : activePersona);
 
           return (
             <div
               key={i}
-              style={{
-                ...styles.msgRow,
-                justifyContent: isUser ? "flex-end" : "flex-start",
-              }}
+              style={{ ...s.msgRow, justifyContent: isUser ? "flex-end" : "flex-start" }}
             >
-              <div style={styles.msgBubbleWrap}>
-                {!isUser && (
-                  <div style={styles.msgSender}>
-                    <span
-                      style={{
-                        ...styles.msgSenderDot,
-                        background: selectedPersona.color,
-                      }}
-                    />
-                    {selectedPersona.name}
+              <div style={s.msgBubbleWrap}>
+                {/* Label: always on agent messages; on user messages only in debate mode */}
+                {(!isUser || (mode === "debate" && msg.isDebateUser)) && (
+                  <div style={s.msgSender}>
+                    <span style={{ ...s.msgSenderDot, background: bubblePersona?.color }} />
+                    {isUser ? `You (${userPersona.name})` : bubblePersona?.name}
                   </div>
                 )}
                 <div
                   style={{
-                    ...styles.msgBubble,
-                    ...(isUser ? styles.userBubble : styles.agentBubble),
-                    borderColor: isUser
-                      ? "transparent"
-                      : selectedPersona.color + "20",
+                    ...s.msgBubble,
+                    ...(isUser
+                      ? mode === "debate"
+                        ? {
+                            background: userPersona.color + "12",
+                            border: `1px solid ${userPersona.color}28`,
+                            color: "#1c1917",
+                            borderRadius: "12px 12px 4px 12px",
+                          }
+                        : s.userBubble
+                      : { ...s.agentBubble, borderColor: bubblePersona?.color + "25" }),
                   }}
                 >
                   {msg.content}
                 </div>
-                {/* Source citation indicator */}
-                {msg.sources && msg.sources.documentsUsed.length > 0 && (
+                {msg.sources?.documentsUsed?.length > 0 && (
                   <button
                     onClick={() => {
                       setLastSources(msg.sources);
                       setShowSources(true);
                     }}
-                    style={{
-                      ...styles.sourceIndicator,
-                      color: selectedPersona.color,
-                    }}
+                    style={{ ...s.sourceIndicator, color: bubblePersona?.color }}
                   >
                     📄 Based on {msg.sources.documentsUsed.length} document
-                    {msg.sources.documentsUsed.length !== 1 ? "s" : ""} · View
-                    sources
+                    {msg.sources.documentsUsed.length !== 1 ? "s" : ""} · View sources
                   </button>
                 )}
                 {msg.meta && (
-                  <div style={styles.metaLine}>
+                  <div style={s.metaLine}>
                     Retrieved in {msg.meta.retrievalTimeMs}ms · Generated in{" "}
-                    {msg.meta.generationTimeMs}ms · {msg.meta.tokensUsed.output}{" "}
-                    tokens
+                    {msg.meta.generationTimeMs}ms · {msg.meta.tokensUsed.output} tokens
                   </div>
                 )}
               </div>
@@ -427,43 +439,44 @@ export default function App() {
           );
         })}
 
-        {/* RAG pipeline visualization during loading */}
+        {/* RAG pipeline visualization while loading */}
         {isLoading && (
-          <div style={{ ...styles.msgRow, justifyContent: "flex-start" }}>
+          <div style={{ ...s.msgRow, justifyContent: "flex-start" }}>
             <div style={{ maxWidth: "80%", minWidth: 240 }}>
-              <div style={styles.msgSender}>
+              <div style={s.msgSender}>
                 <span
                   style={{
-                    ...styles.msgSenderDot,
-                    background: selectedPersona.color,
+                    ...s.msgSenderDot,
+                    background:
+                      mode === "debate" ? respondingNow?.color : activePersona?.color,
                   }}
                 />
-                {selectedPersona.name}
+                {mode === "debate" ? respondingNow?.name : activePersona?.name}
               </div>
-              <div style={styles.ragPipeline}>
+              <div style={s.ragPipeline}>
                 <RagStepIndicator
                   step={1}
                   label="Searching knowledge base"
-                  sublabel={`Scanning ${stats?.totalChunks || "..."} document passages`}
-                  active={true}
-                  color={selectedPersona.color}
+                  sublabel={`Scanning ${stats?.totalChunks || "..."} passages`}
+                  active
+                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
                 />
-                <div style={styles.ragPipelineArrow}>↓</div>
+                <div style={s.ragPipelineArrow}>↓</div>
                 <RagStepIndicator
                   step={2}
                   label="Retrieving relevant passages"
-                  sublabel="Ranking by TF-IDF relevance score"
-                  active={true}
-                  color={selectedPersona.color}
+                  sublabel="Ranking by TF-IDF relevance"
+                  active
+                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
                   delay={800}
                 />
-                <div style={styles.ragPipelineArrow}>↓</div>
+                <div style={s.ragPipelineArrow}>↓</div>
                 <RagStepIndicator
                   step={3}
-                  label={`Generating response as ${selectedPersona.name}`}
+                  label="Generating response"
                   sublabel="Grounding answer in retrieved documents"
-                  active={true}
-                  color={selectedPersona.color}
+                  active
+                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
                   delay={1600}
                 />
               </div>
@@ -474,32 +487,27 @@ export default function App() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* Sources panel (slide-up) */}
+      {/* Sources panel */}
       {showSources && lastSources && (
-        <div style={styles.sourcesOverlay} onClick={() => setShowSources(false)}>
-          <div style={styles.sourcesPanel} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.sourcesPanelHeader}>
-              <h3 style={styles.sourcesPanelTitle}>Retrieved Sources</h3>
-              <button
-                onClick={() => setShowSources(false)}
-                style={styles.sourcesClose}
-              >
+        <div style={s.sourcesOverlay} onClick={() => setShowSources(false)}>
+          <div style={s.sourcesPanel} onClick={(e) => e.stopPropagation()}>
+            <div style={s.sourcesPanelHeader}>
+              <h3 style={s.sourcesPanelTitle}>Retrieved Sources</h3>
+              <button onClick={() => setShowSources(false)} style={s.sourcesClose}>
                 ✕
               </button>
             </div>
-            <p style={styles.sourcesExplainer}>
-              These document passages were retrieved from the knowledge base and
-              used to ground the agent's response:
+            <p style={s.sourcesExplainer}>
+              These passages were retrieved from the knowledge base and used to ground the
+              response:
             </p>
             {lastSources.chunksUsed.map((chunk, i) => (
-              <div key={i} style={styles.sourceChunk}>
-                <div style={styles.sourceChunkHeader}>
-                  <span style={styles.sourceChunkFile}>{chunk.source}</span>
-                  <span style={styles.sourceChunkScore}>
-                    relevance: {chunk.score.toFixed(2)}
-                  </span>
+              <div key={i} style={s.sourceChunk}>
+                <div style={s.sourceChunkHeader}>
+                  <span style={s.sourceChunkFile}>{chunk.source}</span>
+                  <span style={s.sourceChunkScore}>relevance: {chunk.score.toFixed(2)}</span>
                 </div>
-                <div style={styles.sourceChunkText}>{chunk.preview}</div>
+                <div style={s.sourceChunkText}>{chunk.preview}</div>
               </div>
             ))}
           </div>
@@ -507,16 +515,16 @@ export default function App() {
       )}
 
       {/* Preset questions */}
-      <div style={styles.presetsBar}>
-        <div style={styles.presetsScroll}>
-          {PRESETS.map((q, i) => (
+      <div style={s.presetsBar}>
+        <div style={s.presetsScroll}>
+          {(mode === "debate" ? DEBATE_PRESETS : CONSULT_PRESETS).map((q, i) => (
             <button
               key={i}
               onClick={() => handleSend(q.text)}
               disabled={isLoading}
               style={{
-                ...styles.presetBtn,
-                borderColor: selectedPersona.color + "30",
+                ...s.presetBtn,
+                borderColor: (accentColor || "#e7e5e4") + "40",
                 opacity: isLoading ? 0.4 : 1,
               }}
             >
@@ -527,9 +535,9 @@ export default function App() {
       </div>
 
       {/* Input */}
-      <div style={styles.inputBar}>
-        {error && <div style={styles.errorInline}>{error}</div>}
-        <div style={styles.inputRow}>
+      <div style={s.inputBar}>
+        {error && <div style={s.errorInline}>{error}</div>}
+        <div style={s.inputRow}>
           <textarea
             ref={inputRef}
             value={input}
@@ -537,22 +545,26 @@ export default function App() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit();
+                handleSend(input);
               }
             }}
-            placeholder={`Ask ${selectedPersona.name} about the bridge project...`}
+            placeholder={
+              mode === "debate"
+                ? `Speak as ${userPersona?.name}...`
+                : `Ask ${activePersona?.name} about the bridge project...`
+            }
             rows={1}
-            style={styles.textarea}
+            style={s.textarea}
           />
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSend(input)}
             disabled={!input.trim() || isLoading}
             style={{
-              ...styles.sendBtn,
+              ...s.sendBtn,
               background:
                 input.trim() && !isLoading
-                  ? selectedPersona.color
-                  : selectedPersona.color + "30",
+                  ? accentColor
+                  : (accentColor || "#1c1917") + "30",
               cursor: input.trim() && !isLoading ? "pointer" : "default",
             }}
           >
@@ -561,26 +573,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* CSS animations */}
       <style>{`
-        @keyframes ragStepIn {
-          from { opacity: 0; transform: translateX(-8px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        textarea::placeholder {
-          color: #a8a29e;
-        }
+        @keyframes ragStepIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        textarea::placeholder { color: #a8a29e; }
       `}</style>
     </div>
   );
 }
 
 // ── STYLES ──────────────────────────────────────────────────────────────
-// Using object styles for a single-file component.
-const styles = {
+const s = {
   // Intro
   introContainer: {
     minHeight: "100vh",
@@ -594,16 +598,10 @@ const styles = {
   introBg: {
     position: "absolute",
     inset: 0,
-    background:
-      "radial-gradient(ellipse at 50% 0%, rgba(6,95,70,0.06) 0%, transparent 60%)",
+    background: "radial-gradient(ellipse at 50% 0%, rgba(6,95,70,0.06) 0%, transparent 60%)",
     pointerEvents: "none",
   },
-  introContent: {
-    maxWidth: 880,
-    width: "100%",
-    position: "relative",
-    zIndex: 1,
-  },
+  introContent: { maxWidth: 900, width: "100%", position: "relative", zIndex: 1 },
   introBadge: {
     display: "inline-block",
     background: "#065f4610",
@@ -624,12 +622,7 @@ const styles = {
     margin: "0 0 8px",
     lineHeight: 1.1,
   },
-  introSubtitle: {
-    fontSize: 20,
-    fontWeight: 400,
-    color: "#78716c",
-    margin: "0 0 20px",
-  },
+  introSubtitle: { fontSize: 20, fontWeight: 400, color: "#78716c", margin: "0 0 20px" },
   introDesc: {
     fontSize: 15,
     color: "#57534e",
@@ -648,72 +641,76 @@ const styles = {
     fontSize: 13,
     maxWidth: 480,
   },
-  statsLabel: {
+  statsLabel: { fontWeight: 600, color: "#44403c" },
+  statsValue: { color: "#78716c" },
+
+  // Mode selection
+  modeGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 16,
+    marginBottom: 32,
+    maxWidth: 640,
+  },
+  modeCard: {
+    background: "#fff",
+    border: "2px solid #e7e5e4",
+    borderRadius: 12,
+    padding: "20px 20px",
+    textAlign: "left",
+    cursor: "pointer",
+    transition: "all 0.15s",
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  modeCardActive: {
+    borderColor: "#065f46",
+    background: "#065f4606",
+    boxShadow: "0 0 0 3px #065f4615",
+  },
+  modeEmoji: { fontSize: 28, marginBottom: 10 },
+  modeTitle: { fontSize: 16, fontWeight: 700, color: "#1c1917", marginBottom: 6 },
+  modeDesc: { fontSize: 13, color: "#78716c", lineHeight: 1.6 },
+
+  // Persona grid
+  personaSelectLabel: {
+    fontSize: 14,
     fontWeight: 600,
     color: "#44403c",
-  },
-  statsValue: {
-    color: "#78716c",
+    marginBottom: 12,
+    marginTop: 0,
   },
   personaGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: 16,
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 14,
     marginBottom: 32,
   },
   personaCard: {
     background: "#fff",
     border: "1.5px solid",
     borderRadius: 12,
-    padding: "20px 16px",
+    padding: "18px 16px",
     textAlign: "left",
     cursor: "pointer",
     transition: "all 0.2s",
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    gap: 5,
     fontFamily: "'DM Sans', sans-serif",
   },
-  personaIcon: {
-    fontSize: 28,
-    marginBottom: 4,
-  },
-  personaName: {
-    fontSize: 16,
-    fontWeight: 700,
-  },
-  personaOrg: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#57534e",
-  },
-  personaRole: {
-    fontSize: 12,
-    color: "#a8a29e",
-  },
-  personaDesc: {
-    fontSize: 12,
-    color: "#78716c",
-    lineHeight: 1.5,
-    flex: 1,
-  },
+  personaIcon: { fontSize: 26, marginBottom: 4 },
+  personaName: { fontSize: 15, fontWeight: 700 },
+  personaOrg: { fontSize: 12, fontWeight: 600, color: "#57534e" },
+  personaRole: { fontSize: 11, color: "#a8a29e" },
+  personaDesc: { fontSize: 12, color: "#78716c", lineHeight: 1.5, flex: 1 },
   personaBtn: {
     marginTop: 8,
     color: "#fff",
     fontSize: 12,
     fontWeight: 600,
-    padding: "8px 12px",
+    padding: "7px 12px",
     borderRadius: 6,
     textAlign: "center",
-  },
-  ragExplainer: {
-    fontSize: 13,
-    color: "#78716c",
-    lineHeight: 1.7,
-    padding: "16px 20px",
-    background: "#f5f5f4",
-    borderRadius: 8,
-    borderLeft: "3px solid #065f46",
   },
   errorBox: {
     background: "#fef2f2",
@@ -734,7 +731,7 @@ const styles = {
     fontFamily: "'DM Sans', sans-serif",
   },
   header: {
-    padding: "12px 20px",
+    padding: "10px 16px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -743,84 +740,77 @@ const styles = {
     flexWrap: "wrap",
     gap: 8,
   },
-  headerLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
+  headerLeft: { display: "flex", alignItems: "center", gap: 10 },
+  headerRight: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
   headerIcon: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     borderRadius: "50%",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 18,
+    fontSize: 17,
+    flexShrink: 0,
   },
-  headerName: {
-    fontSize: 15,
-    fontWeight: 700,
-    color: "#1c1917",
-  },
-  headerRole: {
-    fontSize: 12,
-    color: "#78716c",
-  },
-  switcherRow: {
-    display: "flex",
-    gap: 6,
-    flexWrap: "wrap",
-  },
+  headerName: { fontSize: 14, fontWeight: 700, color: "#1c1917" },
+  headerRole: { fontSize: 11, color: "#78716c" },
+
+  switcherRow: { display: "flex", gap: 5, flexWrap: "wrap" },
   switchBtn: {
     background: "transparent",
     border: "1px solid",
     borderRadius: 20,
-    padding: "4px 12px",
-    fontSize: 12,
+    padding: "3px 10px",
+    fontSize: 11,
     fontWeight: 500,
     cursor: "pointer",
     fontFamily: "'DM Sans', sans-serif",
     transition: "all 0.15s",
   },
-
-  // Chat
-  chatArea: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "20px 24px",
+  debateChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "3px 10px",
+    borderRadius: 20,
+    fontSize: 11,
+    fontWeight: 500,
+    transition: "all 0.2s",
   },
-  systemMsg: {
-    background: "#f5f5f4",
-    border: "1px solid #e7e5e4",
-    borderRadius: 10,
-    padding: "12px 16px",
-    marginBottom: 16,
-    maxWidth: 540,
-    marginLeft: "auto",
-    marginRight: "auto",
-  },
-  systemLabel: {
+  resetBtn: {
+    background: "transparent",
+    border: "1px solid #d6d3d1",
+    borderRadius: 20,
+    padding: "4px 12px",
     fontSize: 11,
     fontWeight: 600,
     color: "#78716c",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    whiteSpace: "nowrap",
   },
-  systemText: {
-    fontSize: 13,
-    color: "#57534e",
-    lineHeight: 1.6,
-    fontStyle: "italic",
-  },
-  msgRow: {
+
+  // Chat
+  chatArea: { flex: 1, overflowY: "auto", padding: "20px 24px" },
+
+  // Divider (replaces system message box)
+  divider: {
     display: "flex",
-    marginBottom: 16,
+    alignItems: "center",
+    gap: 10,
+    margin: "12px 0",
   },
-  msgBubbleWrap: {
-    maxWidth: "75%",
-    minWidth: 80,
+  dividerLine: { flex: 1, height: 1, background: "#e7e5e4" },
+  dividerText: {
+    fontSize: 11,
+    color: "#a8a29e",
+    whiteSpace: "nowrap",
+    fontWeight: 500,
+    letterSpacing: 0.3,
   },
+
+  msgRow: { display: "flex", marginBottom: 16 },
+  msgBubbleWrap: { maxWidth: "75%", minWidth: 80 },
   msgSender: {
     display: "flex",
     alignItems: "center",
@@ -866,24 +856,7 @@ const styles = {
     textDecorationStyle: "dotted",
     textUnderlineOffset: 2,
   },
-  metaLine: {
-    fontSize: 10,
-    color: "#a8a29e",
-    marginTop: 2,
-  },
-
-  // Loading
-  loadingDots: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "4px 0",
-  },
-  loadingLabel: {
-    fontSize: 12,
-    color: "#a8a29e",
-    fontStyle: "italic",
-  },
+  metaLine: { fontSize: 10, color: "#a8a29e", marginTop: 2 },
 
   // Sources panel
   sourcesOverlay: {
@@ -910,12 +883,7 @@ const styles = {
     alignItems: "center",
     marginBottom: 8,
   },
-  sourcesPanelTitle: {
-    fontSize: 16,
-    fontWeight: 700,
-    color: "#1c1917",
-    margin: 0,
-  },
+  sourcesPanelTitle: { fontSize: 16, fontWeight: 700, color: "#1c1917", margin: 0 },
   sourcesClose: {
     background: "none",
     border: "none",
@@ -923,12 +891,7 @@ const styles = {
     color: "#78716c",
     cursor: "pointer",
   },
-  sourcesExplainer: {
-    fontSize: 13,
-    color: "#78716c",
-    marginBottom: 16,
-    lineHeight: 1.5,
-  },
+  sourcesExplainer: { fontSize: 13, color: "#78716c", marginBottom: 16, lineHeight: 1.5 },
   sourceChunk: {
     background: "#f5f5f4",
     border: "1px solid #e7e5e4",
@@ -936,39 +899,19 @@ const styles = {
     padding: "12px 14px",
     marginBottom: 10,
   },
-  sourceChunkHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  sourceChunkFile: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: "#44403c",
-  },
-  sourceChunkScore: {
-    fontSize: 11,
-    color: "#a8a29e",
-  },
-  sourceChunkText: {
-    fontSize: 12,
-    color: "#57534e",
-    lineHeight: 1.5,
-    fontStyle: "italic",
-  },
+  sourceChunkHeader: { display: "flex", justifyContent: "space-between", marginBottom: 6 },
+  sourceChunkFile: { fontSize: 12, fontWeight: 600, color: "#44403c" },
+  sourceChunkScore: { fontSize: 11, color: "#a8a29e" },
+  sourceChunkText: { fontSize: 12, color: "#57534e", lineHeight: 1.5, fontStyle: "italic" },
 
   // Presets
   presetsBar: {
-    padding: "8px 20px 4px",
+    padding: "8px 16px 4px",
     borderTop: "1px solid #e7e5e4",
     flexShrink: 0,
     overflowX: "auto",
   },
-  presetsScroll: {
-    display: "flex",
-    gap: 6,
-    paddingBottom: 6,
-  },
+  presetsScroll: { display: "flex", gap: 6, paddingBottom: 6 },
   presetBtn: {
     background: "#fff",
     border: "1px solid",
@@ -984,20 +927,9 @@ const styles = {
   },
 
   // Input
-  inputBar: {
-    padding: "10px 20px 16px",
-    flexShrink: 0,
-  },
-  errorInline: {
-    fontSize: 12,
-    color: "#dc2626",
-    marginBottom: 6,
-  },
-  inputRow: {
-    display: "flex",
-    gap: 8,
-    alignItems: "flex-end",
-  },
+  inputBar: { padding: "10px 16px 16px", flexShrink: 0 },
+  errorInline: { fontSize: 12, color: "#dc2626", marginBottom: 6 },
+  inputRow: { display: "flex", gap: 8, alignItems: "flex-end" },
   textarea: {
     flex: 1,
     padding: "10px 14px",
@@ -1036,10 +968,5 @@ const styles = {
     border: "1px solid #e7e5e4",
     borderRadius: 12,
   },
-  ragPipelineArrow: {
-    textAlign: "center",
-    color: "#d6d3d1",
-    fontSize: 12,
-    lineHeight: 1,
-  },
+  ragPipelineArrow: { textAlign: "center", color: "#d6d3d1", fontSize: 12, lineHeight: 1 },
 };
