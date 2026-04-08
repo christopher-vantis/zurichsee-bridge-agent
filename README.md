@@ -77,12 +77,13 @@ npm run dev
 
 ## Available Stakeholders
 
-| Agent | Organization | Perspective |
-|-------|-------------|-------------|
-| Alex | Pro Natura | Environmental law, biodiversity protection |
-| Dr. Markus Berger | Zürcher Handelskammer | Economic connectivity, business competitiveness |
-| Laura Steiner | VCS | Sustainable mobility, public transport, cycling |
-| Prof. Elisabeth Brunner | Schweizer Heimatschutz | Cultural landscape, heritage protection |
+| Agent | Role | Organization | Perspective |
+|-------|------|-------------|-------------|
+| Alex | Senior Environmental Lawyer | Pro Natura | Environmental law, biodiversity, habitat protection |
+| Dr. Markus Berger | Director of Infrastructure Policy | Zürcher Handelskammer | Economic connectivity, business competitiveness |
+| Laura Steiner | Head of Mobility Policy | VCS Verkehrs-Club der Schweiz | Sustainable mobility, public transport, cycling |
+| Nationalrat Thomas Weidmann | Nationalrat (FDP), Transport Committee | Swiss Federal Parliament | Pro-bridge politician, regional connectivity, public interest |
+| Dr. Miriam Keller | Lead Structural Engineer | Keller & Partner Ingenieure AG | Technical feasibility, construction complexity, cost realism |
 
 ## Tech Stack
 
