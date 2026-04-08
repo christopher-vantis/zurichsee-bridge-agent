@@ -44,34 +44,64 @@ function getClient() {
  * Generate a moderator facilitation message.
  * No RAG — the moderator works purely from conversation context.
  */
+/**
+ * Generate a moderator facilitation message.
+ * Returns { message, nextPersonaId } — the message and who should respond next.
+ *
+ * @param {object} params
+ * @param {string} params.transcript - Recent conversation as formatted text
+ * @param {Array<{id, name, isUser}>} params.participants - All participants
+ * @param {boolean} params.isOpening - Whether this is the opening of the session
+ */
 export async function moderate({ transcript, participants, isOpening }) {
-  const participantList = participants.join(", ");
+  const userParticipant = participants.find((p) => p.isUser);
+  const aiParticipants = participants.filter((p) => !p.isUser);
 
-  const systemPrompt = `You are Kantonsrätin Maya Weber, the neutral chair of this cantonal planning commission meeting about the proposed Zürichsee bridge.
+  const participantDesc = participants
+    .map((p) => `${p.name} (id: "${p.id}"${p.isUser ? " — human participant" : ""})`)
+    .join(", ");
 
-Your style:
-- Maximum 2 sentences per response — be concise and direct
-- Ask one concrete, targeted question per turn
-- Draw out tensions between positions; make stakeholders commit to specifics
-- Reference what was just said when relevant
+  const systemPrompt = `You are Kantonsrätin Maya Weber, neutral chair of this cantonal planning commission meeting about the proposed Zürichsee bridge.
+
+Rules:
+- Exactly 1-2 sentences — no more
+- Direct your question to exactly ONE specific participant by name
+- Be pointed and specific — challenge positions, expose tensions, ask for concrete numbers or legal grounds
 - Never take a side yourself
-- Speak in the same language as the transcript (German or English)
+- Respond in the same language as the transcript (German or English)
 
-Participants at this meeting: ${participantList}`;
+Participants: ${participantDesc}
+
+IMPORTANT: Return ONLY valid JSON — no other text, no markdown:
+{"message": "your facilitation text here", "nextPersonaId": "the_id_of_person_you_addressed"}
+
+Valid persona IDs: ${participants.map((p) => `"${p.id}"`).join(", ")}
+${userParticipant ? `\nPrefer addressing AI participants in the first few exchanges. Address ${userParticipant.name} (id: "${userParticipant.id}") only when you specifically want their perspective.` : ""}`;
 
   const userContent = isOpening
-    ? `Open the meeting with a brief welcome (one sentence) and pose the first question to the group.`
-    : `Based on this exchange:\n\n${transcript}\n\nAsk a sharp follow-up question or redirect the discussion productively. Do not summarize what was just said.`;
+    ? `Open the meeting: welcome participants briefly (one sentence), then direct the first question to one of the AI participants — not the human. Focus on the central tension of the project.`
+    : `Recent exchange:\n\n${transcript}\n\nAsk a sharp follow-up directed at one specific participant.`;
 
   const response = await getClient().messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 200,
+    max_tokens: 300,
     temperature: 0.7,
     system: systemPrompt,
     messages: [{ role: "user", content: userContent }],
   });
 
-  return response.content[0].text;
+  const text = response.content[0].text.trim();
+
+  try {
+    const cleaned = text.replace(/^```json?\s*/i, "").replace(/\s*```$/i, "").trim();
+    return JSON.parse(cleaned);
+  } catch {
+    // Fallback if model doesn't return valid JSON
+    return {
+      message: text,
+      nextPersonaId: aiParticipants[0]?.id || participants[0].id,
+    };
+  }
 }
 
 export async function generate({

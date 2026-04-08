@@ -23,6 +23,7 @@ async function sendChat(query, personaId, history) {
   return res.json();
 }
 
+// participants = [{ id, name, isUser }]
 async function callModerator(transcript, participants, isOpening) {
   const res = await fetch(`${API_BASE}/moderate`, {
     method: "POST",
@@ -30,7 +31,7 @@ async function callModerator(transcript, participants, isOpening) {
     body: JSON.stringify({ transcript, participants, isOpening }),
   });
   if (!res.ok) throw new Error("Moderation failed");
-  return res.json();
+  return res.json(); // { message, nextPersonaId }
 }
 
 function buildTranscript(messages, userPersona) {
@@ -106,6 +107,7 @@ export default function App() {
   const [userPersona, setUserPersona] = useState(null);
   const [debatePersonas, setDebatePersonas] = useState([]);
   const [debateIndex, setDebateIndex] = useState(0);
+  const [chairAddressingUser, setChairAddressingUser] = useState(false);
 
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -130,6 +132,7 @@ export default function App() {
     setUserPersona(null);
     setDebatePersonas([]);
     setDebateIndex(0);
+    setChairAddressingUser(false);
     setMessages([]);
     setInput("");
     setError(null);
@@ -140,29 +143,62 @@ export default function App() {
   const startConsult = async (persona) => {
     setActivePersona(persona);
     setPhase("meeting");
-    const allNames = personas.map((p) => p.name);
-    setMessages([{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }]);
+    const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: false }));
+    const initMsgs = [{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }];
+    setMessages(initMsgs);
     setIsLoading(true);
     try {
-      const mod = await callModerator("", allNames, true);
+      const mod = await callModerator("", participants, true);
       setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
     } catch (_) {}
     setIsLoading(false);
   };
 
   const startDebate = async (myPersona) => {
-    setUserPersona(myPersona);
     const others = personas.filter((p) => p.id !== myPersona.id);
+    setUserPersona(myPersona);
     setDebatePersonas(others);
     setDebateIndex(0);
+    setChairAddressingUser(false);
     setPhase("meeting");
-    const allNames = personas.map((p) => p.name);
-    setMessages([{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }]);
+
+    const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: p.id === myPersona.id }));
+    const initMsgs = [{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }];
+    setMessages(initMsgs);
     setIsLoading(true);
+
     try {
-      const mod = await callModerator("", allNames, true);
-      setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
-    } catch (_) {}
+      // 1. Moderator opens and addresses an AI persona
+      const mod = await callModerator("", participants, true);
+      const modMsg = { role: "moderator", content: mod.message };
+      let currentMsgs = [...initMsgs, modMsg];
+      setMessages(currentMsgs);
+
+      // 2. If moderator addressed an AI persona, auto-generate their response
+      const addressed = mod.nextPersonaId;
+      if (addressed && addressed !== myPersona.id) {
+        const aiPersona = personas.find((p) => p.id === addressed);
+        if (aiPersona) {
+          const result = await sendChat(mod.message, aiPersona.id, []);
+          const aiMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: aiPersona };
+          currentMsgs = [...currentMsgs, aiMsg];
+          setMessages(currentMsgs);
+          setLastSources(result.sources);
+
+          // 3. Moderator follows up — likely now addressing the user
+          const transcript = buildTranscript(currentMsgs, myPersona);
+          const mod2 = await callModerator(transcript, participants, false);
+          const modMsg2 = { role: "moderator", content: mod2.message };
+          currentMsgs = [...currentMsgs, modMsg2];
+          setMessages(currentMsgs);
+          setChairAddressingUser(mod2.nextPersonaId === myPersona.id);
+        }
+      } else {
+        setChairAddressingUser(true);
+      }
+    } catch (e) {
+      console.error("Debate opening error:", e);
+    }
     setIsLoading(false);
   };
 
@@ -185,7 +221,7 @@ export default function App() {
         const userMsg = { role: "user", content: trimmed };
         setMessages((prev) => [...prev, userMsg]);
         const history = messages.filter((m) => m.role !== "system" && m.role !== "moderator").concat(userMsg);
-        const allNames = personas.map((p) => p.name);
+        const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: false }));
 
       try {
           const result = await sendChat(trimmed, activePersona.id, history);
@@ -193,10 +229,9 @@ export default function App() {
           setMessages((prev) => [...prev, agentMsg]);
           setLastSources(result.sources);
           setIsLoading(false);
-          // Moderator follow-up after stakeholder responds
           try {
             const transcript = buildTranscript([...messages, { role: "user", content: trimmed }, agentMsg], null);
-            const mod = await callModerator(transcript, allNames, false);
+            const mod = await callModerator(transcript, participants, false);
             setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
           } catch (_) {}
         } catch (err) {
@@ -206,6 +241,10 @@ export default function App() {
         }
       } else {
         // Debate mode
+        setChairAddressingUser(false);
+        const debateParticipants = personas.map((p) => ({ id: p.id, name: p.name, isUser: p.id === userPersona.id }));
+
+        // Pick the first responder: use round-robin through AI personas
         const respondingPersona = debatePersonas[debateIndex % debatePersonas.length];
         const contextualQuery = `[${userPersona.name}, ${userPersona.role} at ${userPersona.organization}:]\n\n${trimmed}`;
         const userMsg = { role: "user", content: trimmed, isDebateUser: true };
@@ -220,17 +259,46 @@ export default function App() {
           );
 
         try {
+          // First AI responds to user
           const result = await sendChat(contextualQuery, respondingPersona.id, history);
           const agentMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: respondingPersona };
-          setMessages((prev) => [...prev, agentMsg]);
+          let currentMsgs = [...messages, userMsg, agentMsg];
+          setMessages(currentMsgs);
           setLastSources(result.sources);
           setDebateIndex((prev) => (prev + 1) % debatePersonas.length);
           setIsLoading(false);
-          // Moderator follow-up after stakeholder responds
+
+          // Moderator follows up
           try {
-            const transcript = buildTranscript([...messages, userMsg, agentMsg], userPersona);
-            const mod = await callModerator(transcript, allNames, false);
-            setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
+            const transcript = buildTranscript(currentMsgs, userPersona);
+            const mod = await callModerator(transcript, debateParticipants, false);
+            const modMsg = { role: "moderator", content: mod.message };
+            currentMsgs = [...currentMsgs, modMsg];
+            setMessages(currentMsgs);
+
+            // If moderator addresses another AI (not user), auto-respond once more
+            if (mod.nextPersonaId && mod.nextPersonaId !== userPersona.id) {
+              const nextAi = personas.find((p) => p.id === mod.nextPersonaId);
+              if (nextAi) {
+                const result2 = await sendChat(mod.message, nextAi.id,
+                  currentMsgs.filter((m) => m.role !== "system" && m.role !== "moderator")
+                    .map((m) => m.isDebateUser
+                      ? { role: "user", content: `[${userPersona.name}:]\n${m.content}` }
+                      : { role: "assistant", content: m.content })
+                );
+                const aiMsg2 = { role: "assistant", content: result2.response, sources: result2.sources, meta: result2.meta, persona: nextAi };
+                currentMsgs = [...currentMsgs, aiMsg2];
+                setMessages(currentMsgs);
+
+                // Final moderator turn — now likely addressing the user
+                const transcript2 = buildTranscript(currentMsgs, userPersona);
+                const mod2 = await callModerator(transcript2, debateParticipants, false);
+                setMessages((prev) => [...prev, { role: "moderator", content: mod2.message }]);
+                setChairAddressingUser(mod2.nextPersonaId === userPersona.id);
+              }
+            } else {
+              setChairAddressingUser(mod.nextPersonaId === userPersona.id);
+            }
           } catch (_) {}
         } catch (err) {
           setError(err.message);
@@ -239,7 +307,7 @@ export default function App() {
         }
       }
     },
-    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex, personas]
+    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex, personas, chairAddressingUser]
   );
 
   const accentColor = mode === "consult" ? activePersona?.color : userPersona?.color;
@@ -599,6 +667,9 @@ export default function App() {
 
       {/* Input */}
       <div style={s.inputBar}>
+        {mode === "debate" && chairAddressingUser && !isLoading && (
+          <div style={s.chairPrompt}>⚖️ The chair is asking for your response</div>
+        )}
         {error && <div style={s.errorInline}>{error}</div>}
         <div style={s.inputRow}>
           <textarea
@@ -1018,6 +1089,17 @@ const s = {
 
   // Input
   inputBar: { padding: "10px 16px 16px", flexShrink: 0 },
+  chairPrompt: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#92400e",
+    background: "#fef9c3",
+    border: "1px solid #fde68a",
+    borderRadius: 6,
+    padding: "5px 10px",
+    marginBottom: 6,
+    display: "inline-block",
+  },
   errorInline: { fontSize: 12, color: "#dc2626", marginBottom: 6 },
   inputRow: { display: "flex", gap: 8, alignItems: "flex-end" },
   textarea: {

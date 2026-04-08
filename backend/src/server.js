@@ -212,8 +212,8 @@ app.post("/api/chat", async (req, res) => {
 app.post("/api/moderate", async (req, res) => {
   const { transcript = "", participants = [], isOpening = false } = req.body;
   try {
-    const message = await moderate({ transcript, participants, isOpening });
-    res.json({ message });
+    const result = await moderate({ transcript, participants, isOpening });
+    res.json(result); // { message, nextPersonaId }
   } catch (error) {
     console.error("Moderation error:", error.message);
     res.status(500).json({ error: "Moderation failed", detail: error.message });
