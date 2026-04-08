@@ -299,14 +299,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* RAG explanation */}
-          <div style={styles.ragExplainer}>
-            <strong>How it works:</strong> Each agent uses Retrieval-Augmented
-            Generation (RAG). When you ask a question, the system first searches
-            the document corpus for relevant passages, then the AI generates a
-            response grounded in those specific sources — not from general
-            knowledge.
-          </div>
         </div>
       </div>
     );
