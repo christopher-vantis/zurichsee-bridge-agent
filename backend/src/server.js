@@ -210,9 +210,9 @@ app.post("/api/chat", async (req, res) => {
  * Body: { transcript: string, participants: string[], isOpening: boolean }
  */
 app.post("/api/moderate", async (req, res) => {
-  const { transcript = "", participants = [], isOpening = false } = req.body;
+  const { transcript = "", participants = [], isOpening = false, introQueue = [] } = req.body;
   try {
-    const result = await moderate({ transcript, participants, isOpening });
+    const result = await moderate({ transcript, participants, isOpening, introQueue });
     res.json(result); // { message, nextPersonaId }
   } catch (error) {
     console.error("Moderation error:", error.message);

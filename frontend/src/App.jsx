@@ -23,12 +23,12 @@ async function sendChat(query, personaId, history) {
   return res.json();
 }
 
-// participants = [{ id, name, isUser }]
-async function callModerator(transcript, participants, isOpening) {
+// participants = [{ id, name, isUser, turns? }]
+async function callModerator(transcript, participants, isOpening, introQueue = []) {
   const res = await fetch(`${API_BASE}/moderate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript, participants, isOpening }),
+    body: JSON.stringify({ transcript, participants, isOpening, introQueue }),
   });
   if (!res.ok) throw new Error("Moderation failed");
   return res.json(); // { message, nextPersonaId }
@@ -47,49 +47,254 @@ function buildTranscript(messages, userPersona) {
     .join("\n\n");
 }
 
-const CONSULT_PRESETS = [
-  { label: "Position on bridge", text: "What is your position on the proposed bridge over Lake Zürich?" },
-  { label: "Budget cuts", text: "The mayor proposes cutting the environmental mitigation budget by 40%. How do you respond?" },
-  { label: "Economic benefits", text: "The bridge would reduce commute times by 35 minutes and create 2,000 jobs. Doesn't that outweigh environmental concerns?" },
-  { label: "Compromise offer", text: "We are willing to plant 500 trees and create a small nature reserve as compensation. Would that address your concerns?" },
-  { label: "Legal challenge", text: "If the project proceeds without addressing your demands, what will you do?" },
-  { label: "Alternatives", text: "What alternatives to the bridge would you propose to improve cross-lake connectivity?" },
-];
+// ── TRANSLATIONS ──────────────────────────────────────────────────────────
+const T = {
+  en: {
+    // Story page
+    storyBadge: "CSCW 2026 — Interactive Prototype",
+    storyTitle: "Zürichsee Bridge",
+    storySession: "Cantonal Planning Commission — Session 1",
+    storyP1: "The Canton of Zürich is considering the construction of a new fixed crossing over Lake Zürich: a cable-stayed bridge connecting the eastern and western shores between Rapperswil and Freienbach.",
+    storyP2: "This is the first official planning commission session. Key stakeholders — an environmental lawyer, a business representative, a mobility advocate, a federal parliamentarian, and a structural engineer — have been invited to present their positions before any decisions are made.",
+    storyP3: "Several parties were unable to attend in person. Their AI agents represent them, drawing on real Swiss laws, environmental reports, and position papers.",
+    storyCta: "Enter the session →",
+    // Mode selection page
+    modeHeading: "How would you like to participate?",
+    modeBack: "← Back",
+    modeConsultTitle: "Interview a Stakeholder",
+    modeConsultDesc: "Step into the role of a journalist or facilitator. Select any party and ask them direct questions about the bridge project. Switch between stakeholders at any time to compare positions.",
+    modeConsultDetail: "Direct Q&A · no moderation · switch freely",
+    modeDebateTitle: "Take a Seat at the Table",
+    modeDebateDesc: "Choose a stakeholder role and participate in the full session. Kantonsrätin Weber will moderate: after an introduction round, the discussion is opened and you'll speak when the chair invites you.",
+    modeDebateDetail: "Intro round · moderated discussion · your turn to speak",
+    selectConsult: "Which stakeholder would you like to interview?",
+    selectDebate: "Which role will you play in the meeting?",
+    btnConsult: (n) => `Interview ${n} →`,
+    btnDebate: (n) => `Play as ${n} →`,
+    kbLabel: "Knowledge base",
+    kbValue: (d, c) => `${d} documents · ${c} indexed passages`,
+    // Meeting
+    reset: "← Back to modes",
+    chairPrompt: "⚖️ The chair is asking for your response",
+    consultHint: "You are the journalist / facilitator — select a preset question below or type your own.",
+    onboardingTitleConsult: "How it works",
+    onboardingTipsConsult: [
+      "Pick a preset question from the bar below, or type your own in the input field",
+      "Switch between stakeholders using the icons in the top bar",
+      "Each agent draws on real Swiss laws, environmental reports, and position papers",
+    ],
+    onboardingTitleDebate: "You're in the session",
+    onboardingTipsDebate: [
+      "Click 'Continue' after each introduction to advance the round",
+      "The chair will invite you to speak — watch for the gold prompt below",
+      "Use the preset lines or write your own position",
+    ],
+    onboardingDismiss: "Got it →",
+    continueIntro: (n) => `Continue → ${n} introduces themselves`,
+    continueDiscussion: "Continue → advance discussion",
+    placeholderDebate: (n) => `Speak as ${n}...`,
+    placeholderConsult: (n) => `Ask ${n} a question...`,
+    errorMsg: "Technical error — please try again.",
+    systemConsult: (n, o) => `Interview — ${n} · ${o}`,
+    systemDebate: (n) => `Planning session — you are speaking as ${n}`,
+    openingMsg: (firstName) =>
+      `Welcome to the cantonal planning commission session on the proposed Zürichsee bridge. I am Kantonsrätin Maya Weber, chairing today's meeting. We will begin with a brief introduction round — each party please introduce themselves and state their fundamental position on the project. ${firstName}, would you please start.`,
+    introInvitation: (n) => `Thank you. ${n}, you're next.`,
+    introTransition: (userName) =>
+      `Thank you all for the introductions. Let us now move to the substantive discussion. ${userName}, we look forward to your perspective — please go ahead.`,
+    introQuery:
+      "Please introduce yourself in 2–3 sentences: who are you, which organisation do you represent, and what is your fundamental position on the proposed Zürichsee bridge?",
+  },
+  de: {
+    // Story page
+    storyBadge: "CSCW 2026 — Interaktiver Prototyp",
+    storyTitle: "Zürichseebrücke",
+    storySession: "Kantonale Planungskommission — Sitzung 1",
+    storyP1: "Der Kanton Zürich prüft den Bau einer neuen festen Querung über den Zürichsee: eine Schrägseilbrücke, die die Ost- und Westseite des Sees zwischen Rapperswil und Freienbach verbinden soll.",
+    storyP2: "Dies ist die erste offizielle Planungskommissionssitzung. Die wichtigsten Stakeholder — ein Umweltanwalt, ein Wirtschaftsvertreter, ein Mobilitätsexperte, ein Nationalrat und eine Bauingenieurin — wurden eingeladen, ihre Positionen darzulegen, bevor Entscheidungen gefällt werden.",
+    storyP3: "Mehrere Parteien konnten nicht persönlich erscheinen. Ihre KI-Agenten vertreten sie auf Basis echter Schweizer Gesetze, Umweltberichte und Positionspapiere.",
+    storyCta: "Sitzung betreten →",
+    // Mode selection page
+    modeHeading: "Wie möchten Sie teilnehmen?",
+    modeBack: "← Zurück",
+    modeConsultTitle: "Stakeholder befragen",
+    modeConsultDesc: "Nehmen Sie die Rolle eines Journalisten oder Moderators ein. Wählen Sie eine Partei und stellen Sie ihr direkt Fragen zum Brückenprojekt. Wechseln Sie jederzeit zwischen den Stakeholdern.",
+    modeConsultDetail: "Direktes Q&A · keine Moderation · frei wechselbar",
+    modeDebateTitle: "An der Sitzung teilnehmen",
+    modeDebateDesc: "Wählen Sie eine Stakeholder-Rolle und nehmen Sie aktiv an der Planungssitzung teil. Kantonsrätin Weber moderiert: nach einer Vorstellungsrunde wird die Diskussion eröffnet und Sie sprechen, wenn Sie an der Reihe sind.",
+    modeDebateDetail: "Vorstellungsrunde · moderierte Diskussion · aktive Teilnahme",
+    selectConsult: "Welche Partei möchten Sie befragen?",
+    selectDebate: "Welche Rolle übernehmen Sie in der Sitzung?",
+    btnConsult: (n) => `${n} befragen →`,
+    btnDebate: (n) => `Als ${n} teilnehmen →`,
+    kbLabel: "Wissensbasis",
+    kbValue: (d, c) => `${d} Dokumente · ${c} indexierte Abschnitte`,
+    // Meeting
+    reset: "← Zurück zu den Modi",
+    chairPrompt: "⚖️ Die Vorsitzende erwartet Ihre Antwort",
+    consultHint: "Du bist die Moderator:in / Journalist:in — wähle eine Frage aus den Vorschlägen oder tippe deine eigene.",
+    onboardingTitleConsult: "So funktioniert's",
+    onboardingTipsConsult: [
+      "Wähle eine Schnellfrage aus der Leiste unten oder tippe deine eigene ein",
+      "Wechsle den Gesprächspartner über die Icons in der oberen Leiste",
+      "Jeder Agent stützt sich auf echte Schweizer Gesetze, Umweltberichte und Positionspapiere",
+    ],
+    onboardingTitleDebate: "Du bist in der Sitzung",
+    onboardingTipsDebate: [
+      "Klicke 'Weiter' nach jeder Vorstellung um die Runde fortzuführen",
+      "Die Vorsitzende gibt dir das Wort — achte auf die goldene Aufforderung unten",
+      "Nutze die Vorschlagstexte oder tippe deine eigene Position",
+    ],
+    onboardingDismiss: "Verstanden →",
+    continueIntro: (n) => `Weiter → ${n} stellt sich vor`,
+    continueDiscussion: "Weiter → Diskussion fortführen",
+    placeholderDebate: (n) => `Sprechen Sie als ${n}...`,
+    placeholderConsult: (n) => `Frage an ${n}...`,
+    errorMsg: "Technischer Fehler — bitte erneut versuchen.",
+    systemConsult: (n, o) => `Direktbefragung — ${n} · ${o}`,
+    systemDebate: (n) => `Planungssitzung — Sie sprechen als ${n}`,
+    openingMsg: (firstName) =>
+      `Guten Tag und herzlich willkommen zur Planungskommissionssitzung über die vorgeschlagene Zürichseebrücke. Ich bin Kantonsrätin Maya Weber und leite diese Sitzung. Wir beginnen mit einer Vorstellungsrunde — ich bitte jede Partei, sich kurz vorzustellen und die eigene Grundposition zum Projekt zu nennen. ${firstName}, bitte beginnen Sie.`,
+    introInvitation: (n) => `Danke. ${n}, Sie sind dran.`,
+    introTransition: (userName) =>
+      `Vielen Dank für die Vorstellungen. Kommen wir nun zur inhaltlichen Diskussion. ${userName}, wir sind gespannt auf Ihre Perspektive — bitte nehmen Sie das Wort.`,
+    introQuery:
+      "Bitte stellen Sie sich in 2–3 Sätzen vor: Wer sind Sie, welche Organisation vertreten Sie, und was ist Ihre grundsätzliche Haltung zum Brückenprojekt über den Zürichsee?",
+  },
+};
 
-const DEBATE_PRESETS = [
-  { label: "Opening statement", text: "I'd like to present my position on this project." },
-  { label: "Push back", text: "I strongly disagree with what was just said, and here's why." },
-  { label: "Propose a deal", text: "Let me suggest a compromise that could address multiple concerns here." },
-  { label: "Legal point", text: "I need to raise a legal consideration that hasn't been adequately addressed." },
-  { label: "Question costs", text: "Let's talk honestly about the financial reality of this project." },
-  { label: "Closing argument", text: "To summarize my position on this matter:" },
-];
+const CONSULT_PRESETS = {
+  en: [
+    { label: "Core position", text: "What is your position on the proposed bridge over Lake Zürich?" },
+    { label: "Budget cuts", text: "The mayor proposes cutting the environmental mitigation budget by 40%. How do you respond?" },
+    { label: "Economic case", text: "The bridge would reduce commute times by 35 minutes and create 2,000 jobs. Doesn't that outweigh environmental concerns?" },
+    { label: "Compromise offer", text: "We are willing to plant 500 trees and create a small nature reserve as compensation. Would that address your concerns?" },
+    { label: "Legal challenge", text: "If the project proceeds without addressing your demands, what will you do?" },
+    { label: "Alternatives", text: "What alternatives to the bridge would you propose to improve cross-lake connectivity?" },
+  ],
+  de: [
+    { label: "Grundposition", text: "Was ist Ihre grundsätzliche Haltung zum geplanten Brückenprojekt über den Zürichsee?" },
+    { label: "Budgetkürzung", text: "Der Stadtrat schlägt vor, das Budget für Umweltmassnahmen um 40% zu kürzen. Wie reagieren Sie darauf?" },
+    { label: "Wirtschaftliche Vorteile", text: "Die Brücke würde Pendelzeiten um 35 Minuten verkürzen und 2'000 Arbeitsplätze schaffen. Überwiegen diese Vorteile die ökologischen Bedenken?" },
+    { label: "Kompromissangebot", text: "Wir sind bereit, 500 Bäume zu pflanzen und ein Naturschutzgebiet einzurichten. Würde das Ihre Forderungen erfüllen?" },
+    { label: "Rechtliche Schritte", text: "Was werden Sie unternehmen, falls das Projekt ohne Berücksichtigung Ihrer Forderungen vorangetrieben wird?" },
+    { label: "Alternativen", text: "Welche Alternativen zur Brücke schlagen Sie vor, um die Verbindung zwischen den Seeufern zu verbessern?" },
+  ],
+};
 
-function RagStepIndicator({ step, label, sublabel, active, color, delay = 0 }) {
-  const [visible, setVisible] = useState(delay === 0);
-  useEffect(() => {
-    if (delay > 0 && active) {
-      const t = setTimeout(() => setVisible(true), delay);
-      return () => clearTimeout(t);
-    }
-  }, [active, delay]);
-  if (!visible) return <div style={{ height: 44 }} />;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: color + "08", border: `1px solid ${color}20`, borderRadius: 8, animation: "ragStepIn 0.3s ease-out" }}>
-      <div style={{ width: 24, height: 24, borderRadius: "50%", background: color + "18", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-        {step}
-      </div>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917" }}>{label}</div>
-        <div style={{ fontSize: 11, color: "#78716c" }}>{sublabel}</div>
-      </div>
-      <div style={{ marginLeft: "auto", width: 14, height: 14, border: `2px solid ${color}40`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
-    </div>
-  );
+const DEBATE_PRESETS = {
+  en: [
+    { label: "Opening statement", text: "I'd like to present my position on this project." },
+    { label: "Push back", text: "I strongly disagree with what was just said, and here's why." },
+    { label: "Propose a deal", text: "Let me suggest a compromise that could address multiple concerns here." },
+    { label: "Legal point", text: "I need to raise a legal consideration that hasn't been adequately addressed." },
+    { label: "Question costs", text: "Let's talk honestly about the financial reality of this project." },
+    { label: "Closing argument", text: "To summarize my position on this matter:" },
+  ],
+  de: [
+    { label: "Eröffnungsstatement", text: "Ich möchte meinen Standpunkt zu diesem Projekt darlegen." },
+    { label: "Widerspruch", text: "Ich widerspreche dem Gesagten entschieden, und zwar aus folgenden Gründen." },
+    { label: "Kompromissvorschlag", text: "Ich möchte einen Kompromiss vorschlagen, der mehrere Interessen berücksichtigt." },
+    { label: "Rechtlicher Einwand", text: "Ich muss auf einen rechtlichen Aspekt hinweisen, der bisher nicht ausreichend behandelt wurde." },
+    { label: "Kosten hinterfragen", text: "Sprechen wir offen über die finanziellen Realitäten dieses Projekts." },
+    { label: "Schlussplädoyer", text: "Zusammenfassend möchte ich meinen Standpunkt nochmals klar festhalten:" },
+  ],
+};
+
+/**
+ * Hardcoded intro step: moderator invites one AI persona to introduce themselves,
+ * AI responds with a short self-introduction (2-3 sentences).
+ * Returns updated messages array.
+ */
+// messages should already include the moderator invitation — this just fetches the AI response.
+async function doIntroStep({ messages, persona, userPersonaName, introQuery, setMessages, setSpeakerCounts }) {
+  const apiHistory = messages
+    .filter((m) => m.role !== "system" && m.role !== "moderator")
+    .map((m) =>
+      m.isDebateUser
+        ? { role: "user", content: `[${userPersonaName}:]\n${m.content}` }
+        : { role: "assistant", content: m.content }
+    );
+
+  const result = await sendChat(introQuery, persona.id, apiHistory);
+
+  const final = [...messages, { role: "assistant", content: result.response, persona }];
+  setMessages([...final]);
+  setSpeakerCounts((prev) => ({ ...prev, [persona.id]: (prev[persona.id] || 0) + 1 }));
+  return final;
 }
 
+/**
+ * ONE step in the moderated discussion phase:
+ * LLM moderator speaks → AI responds → pause (awaitingContinue = true)
+ * If moderator addresses user → chairAddressingUser = true
+ */
+async function stepDebate({
+  messages,
+  debateParticipants,
+  userPersonaId,
+  userPersonaName,
+  allPersonas,
+  setMessages,
+  setChairAddressingUser,
+  setAwaitingContinue,
+  setSpeakerCounts,
+}) {
+  const transcript = buildTranscript(messages, { name: userPersonaName });
+  let mod;
+  try {
+    mod = await callModerator(transcript, debateParticipants, false, []);
+  } catch {
+    setChairAddressingUser(true);
+    setAwaitingContinue(false);
+    return messages;
+  }
+
+  let msgs = [...messages, { role: "moderator", content: mod.message }];
+  setMessages([...msgs]);
+
+  if (!mod.nextPersonaId || mod.nextPersonaId === userPersonaId) {
+    setChairAddressingUser(true);
+    setAwaitingContinue(false);
+    return msgs;
+  }
+
+  const aiPersona = allPersonas.find((p) => p.id === mod.nextPersonaId);
+  if (!aiPersona) {
+    setChairAddressingUser(true);
+    setAwaitingContinue(false);
+    return msgs;
+  }
+
+  const apiHistory = msgs
+    .filter((m) => m.role !== "system" && m.role !== "moderator")
+    .map((m) =>
+      m.isDebateUser
+        ? { role: "user", content: `[${userPersonaName}:]\n${m.content}` }
+        : { role: "assistant", content: m.content }
+    );
+
+  let result;
+  try {
+    result = await sendChat(mod.message, aiPersona.id, apiHistory);
+  } catch {
+    setAwaitingContinue(false);
+    setChairAddressingUser(true);
+    return msgs;
+  }
+
+  msgs = [...msgs, { role: "assistant", content: result.response, persona: aiPersona }];
+  setMessages([...msgs]);
+  setSpeakerCounts((prev) => ({ ...prev, [aiPersona.id]: (prev[aiPersona.id] || 0) + 1 }));
+  setAwaitingContinue(true);
+  setChairAddressingUser(false);
+  return msgs;
+}
+
+
 export default function App() {
-  const [phase, setPhase] = useState("intro");
+  const [lang, setLang] = useState(null); // null = language picker, "en" | "de"
+  const [phase, setPhase] = useState("story"); // "story" | "intro" | "meeting"
   const [mode, setMode] = useState(null); // null | "consult" | "debate"
   const [personas, setPersonas] = useState([]);
   const [stats, setStats] = useState(null);
@@ -97,7 +302,6 @@ export default function App() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [lastSources, setLastSources] = useState(null);
-  const [showSources, setShowSources] = useState(false);
   const [error, setError] = useState(null);
 
   // Consult mode
@@ -106,8 +310,11 @@ export default function App() {
   // Debate mode
   const [userPersona, setUserPersona] = useState(null);
   const [debatePersonas, setDebatePersonas] = useState([]);
-  const [debateIndex, setDebateIndex] = useState(0);
   const [chairAddressingUser, setChairAddressingUser] = useState(false);
+  const [awaitingContinue, setAwaitingContinue] = useState(false);
+  const [introQueue, setIntroQueue] = useState([]); // AI IDs yet to introduce themselves
+  const [speakerCounts, setSpeakerCounts] = useState({}); // personaId → turn count
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -127,75 +334,60 @@ export default function App() {
 
   const reset = () => {
     setPhase("intro");
-    setMode(null);
+    setMode(null);  // go back to mode selection, not story
     setActivePersona(null);
     setUserPersona(null);
     setDebatePersonas([]);
-    setDebateIndex(0);
     setChairAddressingUser(false);
+    setAwaitingContinue(false);
+    setIntroQueue([]);
+    setSpeakerCounts({});
     setMessages([]);
     setInput("");
     setError(null);
     setLastSources(null);
-    setShowSources(false);
+    setShowOnboarding(false);
   };
 
-  const startConsult = async (persona) => {
+  const startConsult = (persona) => {
     setActivePersona(persona);
     setPhase("meeting");
-    const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: false }));
-    const initMsgs = [{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }];
-    setMessages(initMsgs);
-    setIsLoading(true);
-    try {
-      const mod = await callModerator("", participants, true);
-      setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
-    } catch (_) {}
-    setIsLoading(false);
+    setMessages([{ role: "system", content: t.systemConsult(persona.name, persona.organization) }]);
+    setShowOnboarding(true);
   };
 
   const startDebate = async (myPersona) => {
     const others = personas.filter((p) => p.id !== myPersona.id);
     setUserPersona(myPersona);
     setDebatePersonas(others);
-    setDebateIndex(0);
     setChairAddressingUser(false);
+    setAwaitingContinue(false);
+    setSpeakerCounts({});
     setPhase("meeting");
+    setShowOnboarding(true);
 
-    const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: p.id === myPersona.id }));
-    const initMsgs = [{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }];
-    setMessages(initMsgs);
+    // Intro queue: all AI personas in order (excluding user)
+    const queue = others.map((p) => p.id);
+    setIntroQueue(queue);
+
+    const initMsgs = [{ role: "system", content: t.systemDebate(myPersona.name) }];
+    const firstPersona = others[0];
+    const openingMsgs = [
+      ...initMsgs,
+      { role: "moderator", content: t.openingMsg(firstPersona.name) },
+    ];
+    setMessages(openingMsgs);
     setIsLoading(true);
 
     try {
-      // 1. Moderator opens and addresses an AI persona
-      const mod = await callModerator("", participants, true);
-      const modMsg = { role: "moderator", content: mod.message };
-      let currentMsgs = [...initMsgs, modMsg];
-      setMessages(currentMsgs);
-
-      // 2. If moderator addressed an AI persona, auto-generate their response
-      const addressed = mod.nextPersonaId;
-      if (addressed && addressed !== myPersona.id) {
-        const aiPersona = personas.find((p) => p.id === addressed);
-        if (aiPersona) {
-          const result = await sendChat(mod.message, aiPersona.id, []);
-          const aiMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: aiPersona };
-          currentMsgs = [...currentMsgs, aiMsg];
-          setMessages(currentMsgs);
-          setLastSources(result.sources);
-
-          // 3. Moderator follows up — likely now addressing the user
-          const transcript = buildTranscript(currentMsgs, myPersona);
-          const mod2 = await callModerator(transcript, participants, false);
-          const modMsg2 = { role: "moderator", content: mod2.message };
-          currentMsgs = [...currentMsgs, modMsg2];
-          setMessages(currentMsgs);
-          setChairAddressingUser(mod2.nextPersonaId === myPersona.id);
-        }
-      } else {
-        setChairAddressingUser(true);
-      }
+      const afterFirst = await doIntroStep({
+        messages: openingMsgs, persona: firstPersona,
+        userPersonaName: myPersona.name, introQuery: t.introQuery,
+        setMessages, setSpeakerCounts,
+      });
+      setIntroQueue(queue.slice(1));
+      setAwaitingContinue(true);
+      void afterFirst;
     } catch (e) {
       console.error("Debate opening error:", e);
     }
@@ -204,9 +396,62 @@ export default function App() {
 
   const switchPersona = (persona) => {
     setActivePersona(persona);
-    setMessages((prev) => [...prev, { role: "system", content: `Switched to ${persona.name} · ${persona.organization}` }]);
+    setMessages((prev) => [...prev, { role: "system", content: t.systemConsult(persona.name, persona.organization) }]);
     setLastSources(null);
   };
+
+  const handleContinue = useCallback(async () => {
+    if (isLoading || !awaitingContinue) return;
+    setIsLoading(true);
+    setAwaitingContinue(false);
+    setShowOnboarding(false);
+
+    if (introQueue.length > 0) {
+      // Still in intro round — add brief moderator invitation, then get AI intro
+      const nextPersona = personas.find((p) => p.id === introQueue[0]);
+      const tl = T[lang] || T.en;
+      const withInvitation = [
+        ...messages,
+        { role: "moderator", content: tl.introInvitation(nextPersona.name) },
+      ];
+      setMessages(withInvitation);
+      try {
+        await doIntroStep({
+          messages: withInvitation, persona: nextPersona,
+          userPersonaName: userPersona.name, introQuery: tl.introQuery,
+          setMessages, setSpeakerCounts,
+        });
+        const remaining = introQueue.slice(1);
+        setIntroQueue(remaining);
+        if (remaining.length === 0) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "moderator", content: tl.introTransition(userPersona.name) },
+          ]);
+          setChairAddressingUser(true);
+          setAwaitingContinue(false);
+        } else {
+          setAwaitingContinue(true);
+        }
+      } catch (e) {
+        console.error("Intro step error:", e);
+        setAwaitingContinue(true);
+      }
+    } else {
+      // Discussion phase — LLM moderator takes over
+      const debateParticipants = personas.map((p) => ({
+        id: p.id, name: p.name, isUser: p.id === userPersona.id,
+        turns: speakerCounts[p.id] || 0,
+      }));
+      await stepDebate({
+        messages, debateParticipants,
+        userPersonaId: userPersona.id, userPersonaName: userPersona.name,
+        allPersonas: personas,
+        setMessages, setChairAddressingUser, setAwaitingContinue, setSpeakerCounts,
+      });
+    }
+    setIsLoading(false);
+  }, [messages, isLoading, awaitingContinue, userPersona, personas, introQueue, speakerCounts, lang]);
 
   const handleSend = useCallback(
     async (text) => {
@@ -216,161 +461,147 @@ export default function App() {
       setError(null);
       setLastSources(null);
       setIsLoading(true);
+      setShowOnboarding(false);
 
       if (mode === "consult") {
         const userMsg = { role: "user", content: trimmed };
         setMessages((prev) => [...prev, userMsg]);
-        const history = messages.filter((m) => m.role !== "system" && m.role !== "moderator").concat(userMsg);
-        const participants = personas.map((p) => ({ id: p.id, name: p.name, isUser: false }));
-
-      try {
+        const history = messages.filter((m) => m.role !== "system").concat(userMsg);
+        try {
           const result = await sendChat(trimmed, activePersona.id, history);
-          const agentMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: activePersona };
-          setMessages((prev) => [...prev, agentMsg]);
-          setLastSources(result.sources);
-          setIsLoading(false);
-          try {
-            const transcript = buildTranscript([...messages, { role: "user", content: trimmed }, agentMsg], null);
-            const mod = await callModerator(transcript, participants, false);
-            setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
-          } catch (_) {}
+          setMessages((prev) => [...prev, { role: "assistant", content: result.response, persona: activePersona }]);
         } catch (err) {
           setError(err.message);
-          setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: activePersona }]);
-          setIsLoading(false);
+          setMessages((prev) => [...prev, { role: "assistant", content: t.errorMsg, persona: activePersona }]);
         }
+        setIsLoading(false);
       } else {
-        // Debate mode
+        // Debate mode: add user message, then do one moderated step
         setChairAddressingUser(false);
-        const debateParticipants = personas.map((p) => ({ id: p.id, name: p.name, isUser: p.id === userPersona.id }));
-
-        // Pick the first responder: use round-robin through AI personas
-        const respondingPersona = debatePersonas[debateIndex % debatePersonas.length];
-        const contextualQuery = `[${userPersona.name}, ${userPersona.role} at ${userPersona.organization}:]\n\n${trimmed}`;
+        setAwaitingContinue(false);
+        const debateParticipants = personas.map((p) => ({
+          id: p.id, name: p.name, isUser: p.id === userPersona.id,
+          turns: speakerCounts[p.id] || 0,
+        }));
         const userMsg = { role: "user", content: trimmed, isDebateUser: true };
         setMessages((prev) => [...prev, userMsg]);
-
-        const history = messages
-          .filter((m) => m.role !== "system" && m.role !== "moderator")
-          .map((m) =>
-            m.isDebateUser
-              ? { role: "user", content: `[${userPersona.name}:]\n${m.content}` }
-              : { role: "assistant", content: m.content }
-          );
-
+        const currentMsgs = [...messages, userMsg];
         try {
-          // First AI responds to user
-          const result = await sendChat(contextualQuery, respondingPersona.id, history);
-          const agentMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: respondingPersona };
-          let currentMsgs = [...messages, userMsg, agentMsg];
-          setMessages(currentMsgs);
-          setLastSources(result.sources);
-          setDebateIndex((prev) => (prev + 1) % debatePersonas.length);
-          setIsLoading(false);
-
-          // Moderator follows up
-          try {
-            const transcript = buildTranscript(currentMsgs, userPersona);
-            const mod = await callModerator(transcript, debateParticipants, false);
-            const modMsg = { role: "moderator", content: mod.message };
-            currentMsgs = [...currentMsgs, modMsg];
-            setMessages(currentMsgs);
-
-            // If moderator addresses another AI (not user), auto-respond once more
-            if (mod.nextPersonaId && mod.nextPersonaId !== userPersona.id) {
-              const nextAi = personas.find((p) => p.id === mod.nextPersonaId);
-              if (nextAi) {
-                const result2 = await sendChat(mod.message, nextAi.id,
-                  currentMsgs.filter((m) => m.role !== "system" && m.role !== "moderator")
-                    .map((m) => m.isDebateUser
-                      ? { role: "user", content: `[${userPersona.name}:]\n${m.content}` }
-                      : { role: "assistant", content: m.content })
-                );
-                const aiMsg2 = { role: "assistant", content: result2.response, sources: result2.sources, meta: result2.meta, persona: nextAi };
-                currentMsgs = [...currentMsgs, aiMsg2];
-                setMessages(currentMsgs);
-
-                // Final moderator turn — now likely addressing the user
-                const transcript2 = buildTranscript(currentMsgs, userPersona);
-                const mod2 = await callModerator(transcript2, debateParticipants, false);
-                setMessages((prev) => [...prev, { role: "moderator", content: mod2.message }]);
-                setChairAddressingUser(mod2.nextPersonaId === userPersona.id);
-              }
-            } else {
-              setChairAddressingUser(mod.nextPersonaId === userPersona.id);
-            }
-          } catch (_) {}
+          await stepDebate({
+            messages: currentMsgs, debateParticipants,
+            userPersonaId: userPersona.id, userPersonaName: userPersona.name,
+            allPersonas: personas,
+            setMessages, setChairAddressingUser, setAwaitingContinue, setSpeakerCounts,
+          });
         } catch (err) {
           setError(err.message);
-          setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: respondingPersona }]);
-          setIsLoading(false);
+          setMessages((prev) => [...prev, { role: "assistant", content: t.errorMsg }]);
         }
+        setIsLoading(false);
       }
     },
-    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex, personas, chairAddressingUser]
+    [messages, isLoading, mode, activePersona, userPersona, personas, introQueue, speakerCounts, lang]
   );
 
+  const t = T[lang] || T.en;
   const accentColor = mode === "consult" ? activePersona?.color : userPersona?.color;
-  const respondingNow = mode === "debate" ? debatePersonas[debateIndex % debatePersonas.length] : null;
 
-  // ── INTRO ──────────────────────────────────────────────────────────────
+  // ── LANGUAGE PICKER ────────────────────────────────────────────────────
+  if (!lang) {
+    return (
+      <div style={s.langScreen}>
+        <div style={s.langCard}>
+          <div style={s.langTitle}>Zürichsee Bridge</div>
+          <div style={s.langSubtitle}>Stakeholder Consultation Meeting</div>
+          <div style={s.langBtnRow}>
+            <button style={s.langBtn} className="langBtn" onClick={() => setLang("en")}>English</button>
+            <button style={s.langBtn} className="langBtn" onClick={() => setLang("de")}>Deutsch</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── STORY PAGE ─────────────────────────────────────────────────────────
+  if (phase === "story") {
+    return (
+      <div style={s.introContainer}>
+        <div style={s.introBg} />
+        {/* Language toggle — top right */}
+        <div style={s.langToggle}>
+          <button style={{ ...s.langToggleBtn, fontWeight: lang === "en" ? 700 : 400 }} onClick={() => setLang("en")}>EN</button>
+          <span style={s.langToggleSep}>|</span>
+          <button style={{ ...s.langToggleBtn, fontWeight: lang === "de" ? 700 : 400 }} onClick={() => setLang("de")}>DE</button>
+        </div>
+
+        <div style={s.storyContent}>
+          <div style={s.introBadge}>{t.storyBadge}</div>
+          <h1 style={s.introTitle}>{t.storyTitle}</h1>
+          <p style={s.storySession}>{t.storySession}</p>
+
+          <div style={s.heroWrap}>
+            <img src="/bridge.png" alt="Zürichsee bridge concept" style={s.heroImg} />
+          </div>
+
+          <div style={s.storyBody}>
+            <p style={s.storyP}>{t.storyP1}</p>
+            <p style={s.storyP}>{t.storyP2}</p>
+            <p style={s.storyP}>{t.storyP3}</p>
+          </div>
+
+          <button style={s.storyCta} className="storyCta" onClick={() => setPhase("intro")}>
+            {t.storyCta}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── MODE SELECTION ──────────────────────────────────────────────────────
   if (phase === "intro") {
     return (
       <div style={s.introContainer}>
         <div style={s.introBg} />
+        {/* Language toggle — top right */}
+        <div style={s.langToggle}>
+          <button style={{ ...s.langToggleBtn, fontWeight: lang === "en" ? 700 : 400 }} onClick={() => setLang("en")}>EN</button>
+          <span style={s.langToggleSep}>|</span>
+          <button style={{ ...s.langToggleBtn, fontWeight: lang === "de" ? 700 : 400 }} onClick={() => setLang("de")}>DE</button>
+        </div>
+
         <div style={s.introContent}>
-          <div style={s.introBadge}>CSCW 2026 — Interactive Prototype</div>
-          <h1 style={s.introTitle}>Zürichsee Bridge</h1>
-          <h2 style={s.introSubtitle}>Stakeholder Consultation Meeting</h2>
-          <p style={s.introDesc}>
-            Key stakeholders couldn't attend today's planning session. Their AI agents represent
-            their positions — drawing on real Swiss policy documents, laws, and position papers.
-          </p>
+          {/* Back to story */}
+          <button style={s.backBtn} onClick={() => setPhase("story")}>{t.modeBack}</button>
+
+          <h2 style={s.modeHeading}>{t.modeHeading}</h2>
 
           {error && <div style={s.errorBox}>{error}</div>}
 
-          {stats && (
-            <div style={s.statsBox}>
-              <span style={s.statsLabel}>Knowledge Base</span>
-              <span style={s.statsValue}>
-                {stats.totalDocuments} documents · {stats.totalChunks} indexed passages
-              </span>
-            </div>
-          )}
-
-          {/* Mode selection */}
+          {/* Mode cards */}
           <div style={s.modeGrid}>
             <button
               onClick={() => setMode(mode === "consult" ? null : "consult")}
               style={{ ...s.modeCard, ...(mode === "consult" ? s.modeCardActive : {}) }}
             >
-              <div style={s.modeEmoji}>🎙</div>
-              <div style={s.modeTitle}>Consult a Stakeholder</div>
-              <div style={s.modeDesc}>
-                Ask questions to any stakeholder. You are the meeting facilitator and can
-                switch between them freely.
-              </div>
+              <div style={s.modeTitle}>{t.modeConsultTitle}</div>
+              <div style={s.modeDesc}>{t.modeConsultDesc}</div>
+              <div style={s.modeDetail}>{t.modeConsultDetail}</div>
             </button>
             <button
               onClick={() => setMode(mode === "debate" ? null : "debate")}
               style={{ ...s.modeCard, ...(mode === "debate" ? s.modeCardActive : {}) }}
             >
-              <div style={s.modeEmoji}>⚔️</div>
-              <div style={s.modeTitle}>Join the Debate</div>
-              <div style={s.modeDesc}>
-                Choose your role and speak as that stakeholder. The others will respond to
-                your statements in turn.
-              </div>
+              <div style={s.modeTitle}>{t.modeDebateTitle}</div>
+              <div style={s.modeDesc}>{t.modeDebateDesc}</div>
+              <div style={s.modeDetail}>{t.modeDebateDetail}</div>
             </button>
           </div>
 
-          {/* Persona selection — appears after mode is chosen */}
+          {/* Persona selection */}
           {mode && (
             <div style={{ animation: "fadeIn 0.2s ease-out" }}>
               <p style={s.personaSelectLabel}>
-                {mode === "consult"
-                  ? "Select a stakeholder to begin:"
-                  : "Choose your role in the meeting:"}
+                {mode === "consult" ? t.selectConsult : t.selectDebate}
               </p>
               <div style={s.personaGrid}>
                 {personas.map((p) => (
@@ -394,12 +625,19 @@ export default function App() {
                     <div style={s.personaDesc}>{p.shortDescription}</div>
                     <div style={{ ...s.personaBtn, background: p.color }}>
                       {mode === "consult"
-                        ? `Consult ${p.name.split(" ")[0]} →`
-                        : `Play as ${p.name.split(" ")[0]} →`}
+                        ? t.btnConsult(p.name.split(" ")[0])
+                        : t.btnDebate(p.name.split(" ")[0])}
                     </div>
                   </button>
                 ))}
               </div>
+
+              {stats && (
+                <div style={{ ...s.statsBox, marginTop: 8 }}>
+                  <span style={s.statsLabel}>{t.kbLabel}</span>
+                  <span style={s.statsValue}>{t.kbValue(stats.totalDocuments, stats.totalChunks)}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -438,9 +676,7 @@ export default function App() {
               </div>
               <div>
                 <div style={s.headerName}>You: {userPersona.name}</div>
-                <div style={s.headerRole}>
-                  Next response: {respondingNow?.icon} {respondingNow?.name}
-                </div>
+                <div style={s.headerRole}>{userPersona.role} · {userPersona.organization}</div>
               </div>
             </>
           )}
@@ -465,34 +701,45 @@ export default function App() {
           )}
           {mode === "debate" && (
             <div style={s.switcherRow}>
-              {debatePersonas.map((p, i) => {
-                const isNext = i === debateIndex % debatePersonas.length;
-                return (
-                  <span
-                    key={p.id}
-                    title={`${p.name} — ${isNext ? "responds next" : "waiting"}`}
-                    style={{
-                      ...s.debateChip,
-                      color: p.color,
-                      border: `1px solid ${p.color}${isNext ? "90" : "30"}`,
-                      opacity: isNext ? 1 : 0.45,
-                      fontWeight: isNext ? 700 : 400,
-                    }}
-                  >
-                    {p.icon} {p.name.split(" ")[0]}
-                  </span>
-                );
-              })}
+              {debatePersonas.map((p) => (
+                <span
+                  key={p.id}
+                  title={`${p.name} — ${speakerCounts[p.id] || 0} turns`}
+                  style={{ ...s.debateChip, color: p.color, border: `1px solid ${p.color}30` }}
+                >
+                  {p.icon} {p.name.split(" ")[0]}
+                </span>
+              ))}
             </div>
           )}
+          <div style={s.langToggleInline}>
+            <button style={{ ...s.langToggleBtn, fontWeight: lang === "en" ? 700 : 400 }} onClick={() => setLang("en")}>EN</button>
+            <span style={s.langToggleSep}>|</span>
+            <button style={{ ...s.langToggleBtn, fontWeight: lang === "de" ? 700 : 400 }} onClick={() => setLang("de")}>DE</button>
+          </div>
           <button onClick={reset} style={s.resetBtn}>
-            ↩ Start over
+            {t.reset}
           </button>
         </div>
       </div>
 
       {/* Chat area */}
       <div style={s.chatArea}>
+        {showOnboarding && (
+          <div style={s.onboardingCard}>
+            <div style={s.onboardingTitle}>
+              {mode === "debate" ? t.onboardingTitleDebate : t.onboardingTitleConsult}
+            </div>
+            <ul style={s.onboardingList}>
+              {(mode === "debate" ? t.onboardingTipsDebate : t.onboardingTipsConsult).map((tip, i) => (
+                <li key={i} style={s.onboardingItem}>{tip}</li>
+              ))}
+            </ul>
+            <button onClick={() => setShowOnboarding(false)} style={s.onboardingDismiss}>
+              {t.onboardingDismiss}
+            </button>
+          </div>
+        )}
         {messages.map((msg, i) => {
           if (msg.role === "system") {
             return (
@@ -547,70 +794,18 @@ export default function App() {
                 >
                   {msg.content}
                 </div>
-                {msg.sources?.documentsUsed?.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setLastSources(msg.sources);
-                      setShowSources(true);
-                    }}
-                    style={{ ...s.sourceIndicator, color: bubblePersona?.color }}
-                  >
-                    📄 Based on {msg.sources.documentsUsed.length} document
-                    {msg.sources.documentsUsed.length !== 1 ? "s" : ""} · View sources
-                  </button>
-                )}
-                {msg.meta && (
-                  <div style={s.metaLine}>
-                    Retrieved in {msg.meta.retrievalTimeMs}ms · Generated in{" "}
-                    {msg.meta.generationTimeMs}ms · {msg.meta.tokensUsed.output} tokens
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
 
-        {/* RAG pipeline visualization while loading */}
+        {/* Loading indicator */}
         {isLoading && (
           <div style={{ ...s.msgRow, justifyContent: "flex-start" }}>
-            <div style={{ maxWidth: "80%", minWidth: 240 }}>
-              <div style={s.msgSender}>
-                <span
-                  style={{
-                    ...s.msgSenderDot,
-                    background:
-                      mode === "debate" ? respondingNow?.color : activePersona?.color,
-                  }}
-                />
-                {mode === "debate" ? respondingNow?.name : activePersona?.name}
-              </div>
-              <div style={s.ragPipeline}>
-                <RagStepIndicator
-                  step={1}
-                  label="Searching knowledge base"
-                  sublabel={`Scanning ${stats?.totalChunks || "..."} passages`}
-                  active
-                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
-                />
-                <div style={s.ragPipelineArrow}>↓</div>
-                <RagStepIndicator
-                  step={2}
-                  label="Retrieving relevant passages"
-                  sublabel="Ranking by TF-IDF relevance"
-                  active
-                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
-                  delay={800}
-                />
-                <div style={s.ragPipelineArrow}>↓</div>
-                <RagStepIndicator
-                  step={3}
-                  label="Generating response"
-                  sublabel="Grounding answer in retrieved documents"
-                  active
-                  color={mode === "debate" ? respondingNow?.color : activePersona?.color}
-                  delay={1600}
-                />
-              </div>
+            <div style={s.loadingDots}>
+              <span className="loadingDot" />
+              <span className="loadingDot" />
+              <span className="loadingDot" />
             </div>
           </div>
         )}
@@ -618,37 +813,10 @@ export default function App() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* Sources panel */}
-      {showSources && lastSources && (
-        <div style={s.sourcesOverlay} onClick={() => setShowSources(false)}>
-          <div style={s.sourcesPanel} onClick={(e) => e.stopPropagation()}>
-            <div style={s.sourcesPanelHeader}>
-              <h3 style={s.sourcesPanelTitle}>Retrieved Sources</h3>
-              <button onClick={() => setShowSources(false)} style={s.sourcesClose}>
-                ✕
-              </button>
-            </div>
-            <p style={s.sourcesExplainer}>
-              These passages were retrieved from the knowledge base and used to ground the
-              response:
-            </p>
-            {lastSources.chunksUsed.map((chunk, i) => (
-              <div key={i} style={s.sourceChunk}>
-                <div style={s.sourceChunkHeader}>
-                  <span style={s.sourceChunkFile}>{chunk.source}</span>
-                  <span style={s.sourceChunkScore}>relevance: {chunk.score.toFixed(2)}</span>
-                </div>
-                <div style={s.sourceChunkText}>{chunk.preview}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Preset questions */}
       <div style={s.presetsBar}>
         <div style={s.presetsScroll}>
-          {(mode === "debate" ? DEBATE_PRESETS : CONSULT_PRESETS).map((q, i) => (
+          {(mode === "debate" ? DEBATE_PRESETS[lang] : CONSULT_PRESETS[lang]).map((q, i) => (
             <button
               key={i}
               onClick={() => handleSend(q.text)}
@@ -667,8 +835,18 @@ export default function App() {
 
       {/* Input */}
       <div style={s.inputBar}>
+        {mode === "debate" && awaitingContinue && !isLoading && (
+          <button onClick={handleContinue} style={s.continueBtn} className="continueBtn">
+            {introQueue.length > 0
+              ? t.continueIntro(personas.find((p) => p.id === introQueue[0])?.name)
+              : t.continueDiscussion}
+          </button>
+        )}
         {mode === "debate" && chairAddressingUser && !isLoading && (
-          <div style={s.chairPrompt}>⚖️ The chair is asking for your response</div>
+          <div style={s.chairPrompt}>{t.chairPrompt}</div>
+        )}
+        {mode === "consult" && !messages.some((m) => m.role === "user") && !isLoading && (
+          <div style={s.chairPrompt}>{t.consultHint}</div>
         )}
         {error && <div style={s.errorInline}>{error}</div>}
         <div style={s.inputRow}>
@@ -684,8 +862,8 @@ export default function App() {
             }}
             placeholder={
               mode === "debate"
-                ? `Speak as ${userPersona?.name}...`
-                : `Ask ${activePersona?.name} about the bridge project...`
+                ? t.placeholderDebate(userPersona?.name)
+                : t.placeholderConsult(activePersona?.name)
             }
             rows={1}
             style={s.textarea}
@@ -708,10 +886,15 @@ export default function App() {
       </div>
 
       <style>{`
-        @keyframes ragStepIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .langBtn:hover { background: #f5f5f4; border-color: #a8a29e; }
+        .storyCta:hover { background: #292524; }
+        @keyframes dotPulse { 0%,80%,100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+        .loadingDot { width: 7px; height: 7px; border-radius: 50%; background: #d6d3d1; display: inline-block; animation: dotPulse 1.2s infinite; }
+        .loadingDot:nth-child(2) { animation-delay: 0.2s; }
+        .loadingDot:nth-child(3) { animation-delay: 0.4s; }
         textarea::placeholder { color: #a8a29e; }
+        .continueBtn:hover { background: #f5f5f4; border-color: #a8a29e; }
       `}</style>
     </div>
   );
@@ -719,6 +902,142 @@ export default function App() {
 
 // ── STYLES ──────────────────────────────────────────────────────────────
 const s = {
+  // Language toggle (persistent, top-right on pre-meeting pages)
+  langToggle: {
+    position: "absolute",
+    top: 20,
+    right: 24,
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    zIndex: 10,
+  },
+  langToggleInline: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
+  langToggleBtn: {
+    background: "none",
+    border: "none",
+    fontSize: 12,
+    color: "#78716c",
+    cursor: "pointer",
+    padding: "2px 4px",
+    fontFamily: "'DM Sans', sans-serif",
+    letterSpacing: 0.5,
+  },
+  langToggleSep: { fontSize: 11, color: "#d6d3d1" },
+
+  // Story page
+  storyContent: {
+    maxWidth: 720,
+    width: "100%",
+    position: "relative",
+    zIndex: 1,
+    paddingTop: 16,
+  },
+  storySession: {
+    fontSize: 14,
+    color: "#78716c",
+    fontWeight: 500,
+    margin: "0 0 28px",
+    letterSpacing: 0.2,
+  },
+  storyBody: {
+    maxWidth: 620,
+    marginBottom: 36,
+  },
+  storyP: {
+    fontSize: 15,
+    color: "#57534e",
+    lineHeight: 1.75,
+    margin: "0 0 14px",
+  },
+  storyCta: {
+    display: "inline-block",
+    padding: "14px 32px",
+    background: "#1c1917",
+    color: "#fff",
+    border: "none",
+    borderRadius: 10,
+    fontSize: 15,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    letterSpacing: 0.2,
+    transition: "all 0.15s",
+  },
+
+  // Mode selection page
+  modeHeading: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: "#1c1917",
+    margin: "0 0 24px",
+  },
+  backBtn: {
+    background: "none",
+    border: "none",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#78716c",
+    cursor: "pointer",
+    padding: "0 0 20px",
+    fontFamily: "'DM Sans', sans-serif",
+    display: "block",
+  },
+  modeDetail: {
+    marginTop: 8,
+    fontSize: 11,
+    color: "#a8a29e",
+    fontWeight: 500,
+    letterSpacing: 0.3,
+  },
+
+  // Language picker
+  langScreen: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#fafaf9",
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  langCard: {
+    textAlign: "center",
+  },
+  langTitle: {
+    fontFamily: "'DM Serif Display', serif",
+    fontSize: 36,
+    fontWeight: 400,
+    color: "#1c1917",
+    marginBottom: 6,
+  },
+  langSubtitle: {
+    fontSize: 15,
+    color: "#78716c",
+    marginBottom: 40,
+  },
+  langBtnRow: {
+    display: "flex",
+    gap: 16,
+    justifyContent: "center",
+  },
+  langBtn: {
+    padding: "12px 36px",
+    fontSize: 15,
+    fontWeight: 600,
+    color: "#1c1917",
+    background: "#fff",
+    border: "1.5px solid #d6d3d1",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    transition: "all 0.15s",
+    letterSpacing: 0.3,
+  },
+
   // Intro
   introContainer: {
     minHeight: "100vh",
@@ -777,6 +1096,23 @@ const s = {
   },
   statsLabel: { fontWeight: 600, color: "#44403c" },
   statsValue: { color: "#78716c" },
+
+  // Hero image
+  heroWrap: {
+    width: "100%",
+    maxWidth: 900,
+    borderRadius: 12,
+    overflow: "hidden",
+    marginBottom: 32,
+    boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+  },
+  heroImg: {
+    width: "100%",
+    height: 260,
+    objectFit: "cover",
+    objectPosition: "center 60%",
+    display: "block",
+  },
 
   // Mode selection
   modeGrid: {
@@ -1005,66 +1341,6 @@ const s = {
     color: "#1c1917",
     borderRadius: "12px 12px 12px 4px",
   },
-  sourceIndicator: {
-    background: "none",
-    border: "none",
-    fontSize: 11,
-    fontWeight: 500,
-    cursor: "pointer",
-    padding: "4px 0",
-    fontFamily: "'DM Sans', sans-serif",
-    textDecoration: "underline",
-    textDecorationStyle: "dotted",
-    textUnderlineOffset: 2,
-  },
-  metaLine: { fontSize: 10, color: "#a8a29e", marginTop: 2 },
-
-  // Sources panel
-  sourcesOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.3)",
-    zIndex: 100,
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "center",
-  },
-  sourcesPanel: {
-    background: "#fff",
-    borderRadius: "16px 16px 0 0",
-    padding: "24px",
-    maxHeight: "60vh",
-    overflowY: "auto",
-    width: "100%",
-    maxWidth: 640,
-  },
-  sourcesPanelHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  sourcesPanelTitle: { fontSize: 16, fontWeight: 700, color: "#1c1917", margin: 0 },
-  sourcesClose: {
-    background: "none",
-    border: "none",
-    fontSize: 18,
-    color: "#78716c",
-    cursor: "pointer",
-  },
-  sourcesExplainer: { fontSize: 13, color: "#78716c", marginBottom: 16, lineHeight: 1.5 },
-  sourceChunk: {
-    background: "#f5f5f4",
-    border: "1px solid #e7e5e4",
-    borderRadius: 8,
-    padding: "12px 14px",
-    marginBottom: 10,
-  },
-  sourceChunkHeader: { display: "flex", justifyContent: "space-between", marginBottom: 6 },
-  sourceChunkFile: { fontSize: 12, fontWeight: 600, color: "#44403c" },
-  sourceChunkScore: { fontSize: 11, color: "#a8a29e" },
-  sourceChunkText: { fontSize: 12, color: "#57534e", lineHeight: 1.5, fontStyle: "italic" },
-
   // Presets
   presetsBar: {
     padding: "8px 16px 4px",
@@ -1087,9 +1363,37 @@ const s = {
     transition: "all 0.15s",
   },
 
+  // Loading dots
+  loadingDots: {
+    display: "flex",
+    gap: 5,
+    padding: "14px 16px",
+    background: "#fff",
+    border: "1px solid #e7e5e4",
+    borderRadius: "12px 12px 12px 4px",
+    alignItems: "center",
+  },
+
   // Input
   inputBar: { padding: "10px 16px 16px", flexShrink: 0 },
+  continueBtn: {
+    display: "block",
+    width: "100%",
+    marginBottom: 8,
+    padding: "9px 16px",
+    background: "#fff",
+    border: "1.5px solid #d6d3d1",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#57534e",
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    textAlign: "center",
+    transition: "all 0.15s",
+  },
   chairPrompt: {
+    display: "block",
     fontSize: 12,
     fontWeight: 600,
     color: "#92400e",
@@ -1098,7 +1402,6 @@ const s = {
     borderRadius: 6,
     padding: "5px 10px",
     marginBottom: 6,
-    display: "inline-block",
   },
   errorInline: { fontSize: 12, color: "#dc2626", marginBottom: 6 },
   inputRow: { display: "flex", gap: 8, alignItems: "flex-end" },
@@ -1130,15 +1433,44 @@ const s = {
     transition: "all 0.15s",
   },
 
-  // RAG pipeline visualization
-  ragPipeline: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    padding: "12px 14px",
-    background: "#fff",
-    border: "1px solid #e7e5e4",
-    borderRadius: 12,
+  // Onboarding card
+  onboardingCard: {
+    background: "#fefce8",
+    border: "1px solid #fef08a",
+    borderLeft: "3px solid #ca8a04",
+    borderRadius: 8,
+    padding: "14px 16px",
+    marginBottom: 20,
   },
-  ragPipelineArrow: { textAlign: "center", color: "#d6d3d1", fontSize: 12, lineHeight: 1 },
+  onboardingTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#92400e",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  onboardingList: {
+    margin: "0 0 12px",
+    paddingLeft: 18,
+  },
+  onboardingItem: {
+    fontSize: 13,
+    color: "#78350f",
+    lineHeight: 1.6,
+    marginBottom: 2,
+  },
+  onboardingDismiss: {
+    background: "#ca8a04",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    padding: "6px 14px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    transition: "background 0.15s",
+  },
+
 };

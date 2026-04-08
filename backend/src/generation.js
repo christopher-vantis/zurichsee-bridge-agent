@@ -53,20 +53,25 @@ function getClient() {
  * @param {Array<{id, name, isUser}>} params.participants - All participants
  * @param {boolean} params.isOpening - Whether this is the opening of the session
  */
-export async function moderate({ transcript, participants, isOpening }) {
+export async function moderate({ transcript, participants, isOpening, introQueue = [] }) {
   const userParticipant = participants.find((p) => p.isUser);
   const aiParticipants = participants.filter((p) => !p.isUser);
 
   const participantDesc = participants
-    .map((p) => `${p.name} (id: "${p.id}"${p.isUser ? " — human participant" : ""})`)
+    .map((p) => {
+      let line = `${p.name} (id: "${p.id}"${p.isUser ? " — human participant" : ""})`;
+      if (typeof p.turns === "number") line += ` [${p.turns} turns spoken]`;
+      return line;
+    })
     .join(", ");
 
   const systemPrompt = `You are Kantonsrätin Maya Weber, neutral chair of this cantonal planning commission meeting about the proposed Zürichsee bridge.
 
 Rules:
 - Exactly 1-2 sentences — no more
-- Direct your question to exactly ONE specific participant by name
+- Direct your question or prompt to exactly ONE specific participant by name
 - Be pointed and specific — challenge positions, expose tensions, ask for concrete numbers or legal grounds
+- Distribute speaking turns fairly — look at the [turns spoken] counts and prefer those who have spoken less
 - Never take a side yourself
 - Respond in the same language as the transcript (German or English)
 
@@ -76,11 +81,18 @@ IMPORTANT: Return ONLY valid JSON — no other text, no markdown:
 {"message": "your facilitation text here", "nextPersonaId": "the_id_of_person_you_addressed"}
 
 Valid persona IDs: ${participants.map((p) => `"${p.id}"`).join(", ")}
-${userParticipant ? `\nPrefer addressing AI participants in the first few exchanges. Address ${userParticipant.name} (id: "${userParticipant.id}") only when you specifically want their perspective.` : ""}`;
+${userParticipant ? `\nAddress ${userParticipant.name} (id: "${userParticipant.id}") occasionally — roughly once for every 3-4 AI turns.` : ""}`;
 
-  const userContent = isOpening
-    ? `Open the meeting: welcome participants briefly (one sentence), then direct the first question to one of the AI participants — not the human. Focus on the central tension of the project.`
-    : `Recent exchange:\n\n${transcript}\n\nAsk a sharp follow-up directed at one specific participant.`;
+  let userContent;
+  if (isOpening) {
+    userContent = `Open the meeting with one welcome sentence. Then ask the first AI participant (id: "${aiParticipants[0]?.id}", NOT the human) to briefly introduce themselves and their position on the bridge in 2-3 sentences.`;
+  } else if (introQueue.length > 0) {
+    const nextId = introQueue[0];
+    const nextPerson = participants.find((p) => p.id === nextId);
+    userContent = `Introduction round is still ongoing. Please ask ${nextPerson?.name || nextId} (id: "${nextId}") to briefly introduce themselves and their position on the bridge project in 2-3 sentences.`;
+  } else {
+    userContent = `Recent exchange:\n\n${transcript}\n\nContinue facilitating the discussion. Ask a pointed, specific question to one participant. Check the [turns spoken] counts — prefer someone who has had fewer turns.`;
+  }
 
   const response = await getClient().messages.create({
     model: "claude-sonnet-4-20250514",
