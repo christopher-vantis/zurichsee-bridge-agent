@@ -40,6 +40,40 @@ function getClient() {
  * @param {Array} params.conversationHistory - Previous messages in this session
  * @returns {object} { response: string, sourcesUsed: string[], model: string }
  */
+/**
+ * Generate a moderator facilitation message.
+ * No RAG — the moderator works purely from conversation context.
+ */
+export async function moderate({ transcript, participants, isOpening }) {
+  const participantList = participants.join(", ");
+
+  const systemPrompt = `You are Kantonsrätin Maya Weber, the neutral chair of this cantonal planning commission meeting about the proposed Zürichsee bridge.
+
+Your style:
+- Maximum 2 sentences per response — be concise and direct
+- Ask one concrete, targeted question per turn
+- Draw out tensions between positions; make stakeholders commit to specifics
+- Reference what was just said when relevant
+- Never take a side yourself
+- Speak in the same language as the transcript (German or English)
+
+Participants at this meeting: ${participantList}`;
+
+  const userContent = isOpening
+    ? `Open the meeting with a brief welcome (one sentence) and pose the first question to the group.`
+    : `Based on this exchange:\n\n${transcript}\n\nAsk a sharp follow-up question or redirect the discussion productively. Do not summarize what was just said.`;
+
+  const response = await getClient().messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 200,
+    temperature: 0.7,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userContent }],
+  });
+
+  return response.content[0].text;
+}
+
 export async function generate({
   query,
   retrievedChunks,

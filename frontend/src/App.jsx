@@ -23,6 +23,29 @@ async function sendChat(query, personaId, history) {
   return res.json();
 }
 
+async function callModerator(transcript, participants, isOpening) {
+  const res = await fetch(`${API_BASE}/moderate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript, participants, isOpening }),
+  });
+  if (!res.ok) throw new Error("Moderation failed");
+  return res.json();
+}
+
+function buildTranscript(messages, userPersona) {
+  return messages
+    .filter((m) => m.role !== "system")
+    .slice(-6)
+    .map((m) => {
+      if (m.role === "moderator") return `Chair: ${m.content}`;
+      if (m.role === "user")
+        return `${userPersona ? userPersona.name : "Facilitator"}: ${m.content}`;
+      return `${m.persona?.name || "Stakeholder"}: ${m.content}`;
+    })
+    .join("\n\n");
+}
+
 const CONSULT_PRESETS = [
   { label: "Position on bridge", text: "What is your position on the proposed bridge over Lake Zürich?" },
   { label: "Budget cuts", text: "The mayor proposes cutting the environmental mitigation budget by 40%. How do you respond?" },
@@ -114,19 +137,33 @@ export default function App() {
     setShowSources(false);
   };
 
-  const startConsult = (persona) => {
+  const startConsult = async (persona) => {
     setActivePersona(persona);
-    setMessages([{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }]);
     setPhase("meeting");
+    const allNames = personas.map((p) => p.name);
+    setMessages([{ role: "system", content: `Consulting ${persona.name} · ${persona.organization}` }]);
+    setIsLoading(true);
+    try {
+      const mod = await callModerator("", allNames, true);
+      setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
+    } catch (_) {}
+    setIsLoading(false);
   };
 
-  const startDebate = (myPersona) => {
+  const startDebate = async (myPersona) => {
     setUserPersona(myPersona);
     const others = personas.filter((p) => p.id !== myPersona.id);
     setDebatePersonas(others);
     setDebateIndex(0);
-    setMessages([{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }]);
     setPhase("meeting");
+    const allNames = personas.map((p) => p.name);
+    setMessages([{ role: "system", content: `Debate started — you are speaking as ${myPersona.name}` }]);
+    setIsLoading(true);
+    try {
+      const mod = await callModerator("", allNames, true);
+      setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
+    } catch (_) {}
+    setIsLoading(false);
   };
 
   const switchPersona = (persona) => {
@@ -148,13 +185,24 @@ export default function App() {
         const userMsg = { role: "user", content: trimmed };
         setMessages((prev) => [...prev, userMsg]);
         const history = messages.filter((m) => m.role !== "system").concat(userMsg);
-        try {
+        const allNames = personas.map((p) => p.name);
+
+      try {
           const result = await sendChat(trimmed, activePersona.id, history);
-          setMessages((prev) => [...prev, { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: activePersona }]);
+          const agentMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: activePersona };
+          setMessages((prev) => [...prev, agentMsg]);
           setLastSources(result.sources);
+          setIsLoading(false);
+          // Moderator follow-up after stakeholder responds
+          try {
+            const transcript = buildTranscript([...messages, { role: "user", content: trimmed }, agentMsg], null);
+            const mod = await callModerator(transcript, allNames, false);
+            setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
+          } catch (_) {}
         } catch (err) {
           setError(err.message);
           setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: activePersona }]);
+          setIsLoading(false);
         }
       } else {
         // Debate mode
@@ -173,18 +221,25 @@ export default function App() {
 
         try {
           const result = await sendChat(contextualQuery, respondingPersona.id, history);
-          setMessages((prev) => [...prev, { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: respondingPersona }]);
+          const agentMsg = { role: "assistant", content: result.response, sources: result.sources, meta: result.meta, persona: respondingPersona };
+          setMessages((prev) => [...prev, agentMsg]);
           setLastSources(result.sources);
           setDebateIndex((prev) => (prev + 1) % debatePersonas.length);
+          setIsLoading(false);
+          // Moderator follow-up after stakeholder responds
+          try {
+            const transcript = buildTranscript([...messages, userMsg, agentMsg], userPersona);
+            const mod = await callModerator(transcript, allNames, false);
+            setMessages((prev) => [...prev, { role: "moderator", content: mod.message }]);
+          } catch (_) {}
         } catch (err) {
           setError(err.message);
           setMessages((prev) => [...prev, { role: "assistant", content: "A technical issue prevented my response. Please try again.", persona: respondingPersona }]);
+          setIsLoading(false);
         }
       }
-
-      setIsLoading(false);
     },
-    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex]
+    [messages, isLoading, mode, activePersona, userPersona, debatePersonas, debateIndex, personas]
   );
 
   const accentColor = mode === "consult" ? activePersona?.color : userPersona?.color;
@@ -371,13 +426,21 @@ export default function App() {
       {/* Chat area */}
       <div style={s.chatArea}>
         {messages.map((msg, i) => {
-          // System messages as slim dividers
           if (msg.role === "system") {
             return (
               <div key={i} style={s.divider}>
                 <div style={s.dividerLine} />
                 <span style={s.dividerText}>{msg.content}</span>
                 <div style={s.dividerLine} />
+              </div>
+            );
+          }
+
+          if (msg.role === "moderator") {
+            return (
+              <div key={i} style={s.moderatorMsg}>
+                <div style={s.moderatorLabel}>⚖️ Kantonsrätin Weber · Chair</div>
+                <div style={s.moderatorText}>{msg.content}</div>
               </div>
             );
           }
@@ -792,6 +855,33 @@ const s = {
 
   // Chat
   chatArea: { flex: 1, overflowY: "auto", padding: "20px 24px" },
+
+  // Moderator message
+  moderatorMsg: {
+    background: "#fefce8",
+    border: "1px solid #fef08a",
+    borderLeft: "3px solid #ca8a04",
+    borderRadius: 8,
+    padding: "10px 14px",
+    margin: "8px 0",
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  moderatorLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#92400e",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  moderatorText: {
+    fontSize: 13,
+    color: "#78350f",
+    lineHeight: 1.6,
+    fontStyle: "italic",
+  },
 
   // Divider (replaces system message box)
   divider: {

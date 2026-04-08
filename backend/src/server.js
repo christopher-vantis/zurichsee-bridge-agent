@@ -24,7 +24,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import retriever from "./retrieval.js";
-import { generate } from "./generation.js";
+import { generate, moderate } from "./generation.js";
 import personas from "./personas.js";
 
 // Load environment variables from .env file
@@ -129,10 +129,18 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     // ── Step 1: RETRIEVE ─────────────────────────────────────────────
-    // This is the critical RAG step. We search the knowledge base
-    // for chunks relevant to the user's query.
+    // Build an enriched retrieval query from the current message plus
+    // keywords from recent conversation turns, so retrieval is aware
+    // of what has already been discussed.
     const retrievalStart = Date.now();
-    const retrievedChunks = retriever.retrieve(query, 5);
+    const recentContext = history
+      .slice(-4)
+      .map((m) => m.content)
+      .join(" ")
+      .replace(/<[^>]*>/g, " ") // strip XML tags injected in debate mode
+      .slice(0, 400);
+    const retrievalQuery = recentContext ? `${query} ${recentContext}` : query;
+    const retrievedChunks = retriever.retrieve(retrievalQuery, 5);
     const retrievalTimeMs = Date.now() - retrievalStart;
 
     console.log(
@@ -191,6 +199,24 @@ app.post("/api/chat", async (req, res) => {
       error: "Failed to generate response",
       detail: error.message,
     });
+  }
+});
+
+/**
+ * POST /api/moderate
+ * Generates a moderator facilitation message based on conversation context.
+ * No RAG — the moderator works purely from the transcript.
+ *
+ * Body: { transcript: string, participants: string[], isOpening: boolean }
+ */
+app.post("/api/moderate", async (req, res) => {
+  const { transcript = "", participants = [], isOpening = false } = req.body;
+  try {
+    const message = await moderate({ transcript, participants, isOpening });
+    res.json({ message });
+  } catch (error) {
+    console.error("Moderation error:", error.message);
+    res.status(500).json({ error: "Moderation failed", detail: error.message });
   }
 });
 
