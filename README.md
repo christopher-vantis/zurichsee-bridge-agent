@@ -35,6 +35,8 @@ This application simulates the first official cantonal planning commission sessi
 ### 🎙 Interview a Stakeholder
 Take the role of a journalist or facilitator. Select any party and ask direct questions. Switch between stakeholders at any time to compare positions side by side. No moderation — pure Q&A.
 
+![Chat interface — interviewing Alex / Pro Natura](docs/screen-chat.png)
+
 > *Try asking all five stakeholders the same question and compare how the same facts from the knowledge base are interpreted differently depending on whose perspective is active.*
 
 ### ⚔️ Join the Planning Session
