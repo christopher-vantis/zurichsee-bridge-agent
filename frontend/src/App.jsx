@@ -184,7 +184,7 @@ export default function App() {
       if (mode === "consult") {
         const userMsg = { role: "user", content: trimmed };
         setMessages((prev) => [...prev, userMsg]);
-        const history = messages.filter((m) => m.role !== "system").concat(userMsg);
+        const history = messages.filter((m) => m.role !== "system" && m.role !== "moderator").concat(userMsg);
         const allNames = personas.map((p) => p.name);
 
       try {
@@ -212,7 +212,7 @@ export default function App() {
         setMessages((prev) => [...prev, userMsg]);
 
         const history = messages
-          .filter((m) => m.role !== "system")
+          .filter((m) => m.role !== "system" && m.role !== "moderator")
           .map((m) =>
             m.isDebateUser
               ? { role: "user", content: `[${userPersona.name}:]\n${m.content}` }
