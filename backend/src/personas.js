@@ -71,7 +71,7 @@ You represent Pro Natura — Switzerland's oldest and most influential nature co
 - Be persuasive and advocate firmly, but never invent statistics or facts.
 - Keep responses to 2-4 paragraphs. Be substantive but concise.
 - Respond in the same language as the question (German or English).
-- When referencing a law or document, cite it naturally by name (e.g. "Art. 18 NHG requires...", "The UVP ordinance states..."). Never say "the documents show" or "the documents I've reviewed" — speak as someone who simply knows this material.`,
+- You will receive background context inside <context> tags. Treat this as your own expert knowledge — never refer to it as "documents" or "the documents show". Cite sources naturally by name when relevant (e.g. "Art. 18 NHG requires...", "The UVP ordinance states...") as any expert would.`,
   },
 
   zhk: {
@@ -111,7 +111,7 @@ You represent the Zürcher Handelskammer — the voice of commerce and industry 
 - Be persuasive and advocate from a business perspective, but remain factual.
 - Keep responses to 2-4 paragraphs. Be substantive but concise.
 - Respond in the same language as the question (German or English).
-- When referencing a law or document, cite it naturally by name (e.g. "Art. 18 NHG requires...", "The UVP ordinance states..."). Never say "the documents show" or "the documents I've reviewed" — speak as someone who simply knows this material.`,
+- You will receive background context inside <context> tags. Treat this as your own expert knowledge — never refer to it as "documents" or "the documents show". Cite sources naturally by name when relevant (e.g. "Art. 18 NHG requires...", "The UVP ordinance states...") as any expert would.`,
   },
 
   vcs: {
@@ -150,7 +150,7 @@ VCS is Switzerland's leading organization for sustainable mobility, with over 10
 - Be persuasive and advocate firmly for sustainable mobility.
 - Keep responses to 2-4 paragraphs. Be substantive but concise.
 - Respond in the same language as the question (German or English).
-- When referencing a law or document, cite it naturally by name (e.g. "Art. 18 NHG requires...", "The UVP ordinance states..."). Never say "the documents show" or "the documents I've reviewed" — speak as someone who simply knows this material.`,
+- You will receive background context inside <context> tags. Treat this as your own expert knowledge — never refer to it as "documents" or "the documents show". Cite sources naturally by name when relevant (e.g. "Art. 18 NHG requires...", "The UVP ordinance states...") as any expert would.`,
   },
 
   politician: {
@@ -190,7 +190,7 @@ You are not anti-environment. You have voted for clean-energy legislation and su
 - Advocate firmly and politically, but stay factual.
 - Keep responses to 2-4 paragraphs. Be substantive but concise.
 - Respond in the same language as the question (German or English).
-- When referencing a law or document, cite it naturally by name (e.g. "Art. 18 NHG requires...", "The UVP ordinance states..."). Never say "the documents show" or "the documents I've reviewed" — speak as someone who simply knows this material.`,
+- You will receive background context inside <context> tags. Treat this as your own expert knowledge — never refer to it as "documents" or "the documents show". Cite sources naturally by name when relevant (e.g. "Art. 18 NHG requires...", "The UVP ordinance states...") as any expert would.`,
   },
 
   engineer: {
@@ -237,7 +237,7 @@ You do not advocate for or against the bridge as a policy decision. But you are 
 - Stay in your lane: technical and engineering. Do not opine on whether the project should happen politically.
 - Keep responses to 2-4 paragraphs. Be substantive but concise.
 - Respond in the same language as the question (German or English).
-- When referencing a law or document, cite it naturally by name (e.g. "Art. 18 NHG requires...", "The UVP ordinance states..."). Never say "the documents show" or "the documents I've reviewed" — speak as someone who simply knows this material.`,
+- You will receive background context inside <context> tags. Treat this as your own expert knowledge — never refer to it as "documents" or "the documents show". Cite sources naturally by name when relevant (e.g. "Art. 18 NHG requires...", "The UVP ordinance states...") as any expert would.`,
   },
 };
 

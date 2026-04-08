@@ -61,13 +61,9 @@ ${chunk.text}
   // ── Step 2: Build the user message with injected context ────────────
   // The context comes BEFORE the query so the model reads the documents
   // before seeing the question. This is a standard RAG pattern.
-  const augmentedQuery = `Here are the relevant documents from the knowledge base for this query:
-
-<context>
+  const augmentedQuery = `<context>
 ${contextBlock}
 </context>
-
-Based ONLY on the above documents and your stakeholder perspective, respond to the following:
 
 ${query}`;
 
